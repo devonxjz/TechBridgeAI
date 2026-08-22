@@ -1,0 +1,151 @@
+import { describe, it, expect, beforeEach } from "vitest";
+import { POST } from "@/app/api/research/route";
+import { NextRequest } from "next/server";
+import {
+  createStorageAdapter,
+  createLLMAdapter,
+  createSearchAdapter,
+  createScraperAdapter,
+  resetAdapters,
+} from "@/config";
+import { MockLLMAdapter } from "@/adapters/llm/mock";
+import { MockSearchAdapter } from "@/adapters/search/mock";
+import { MockScraperAdapter } from "@/adapters/scraper/mock";
+import { MemoryStorageAdapter } from "@/adapters/storage/memory";
+
+describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
+  beforeEach(() => {
+    process.env.LLM_PROVIDER = "mock";
+    process.env.SEARCH_PROVIDER = "mock";
+    process.env.SCRAPER_PROVIDER = "mock";
+    process.env.STORAGE_PROVIDER = "memory";
+    resetAdapters();
+  });
+
+  it("handles full E2E research workflow with SSE stream and versioned updates", async () => {
+    const llm = createLLMAdapter() as MockLLMAdapter;
+    const search = createSearchAdapter() as MockSearchAdapter;
+    const scraper = createScraperAdapter() as MockScraperAdapter;
+    const storage = createStorageAdapter() as MemoryStorageAdapter;
+    storage.clear();
+
+    // 1. Setup mock data for initial run
+    search.setResults("Vingroup", [
+      { title: "Tập đoàn Vingroup", url: "https://vingroup.net", snippet: "Tập đoàn tư nhân lớn nhất Việt Nam" },
+    ]);
+    scraper.setPage("https://vingroup.net", {
+      url: "https://vingroup.net",
+      title: "Vingroup Trang chủ",
+      text: "Vingroup là tập đoàn đa ngành hàng đầu Việt Nam, hoạt động trong công nghệ, công nghiệp, thương mại.",
+    });
+
+    const v1MockProfile = {
+      officialName: "Tập đoàn Vingroup",
+      tradingNames: ["Vingroup", "VIC"],
+      taxId: "0101245486",
+      industry: ["Bất động sản", "Công nghệ", "Xe điện"],
+      description: "Tập đoàn kinh tế tư nhân đa ngành hàng đầu Việt Nam.",
+      foundedYear: 1993,
+      website: "https://vingroup.net",
+      keyPeople: [{ name: "Phạm Nhật Vượng", title: "Chủ tịch HĐQT" }],
+      products: ["Vinhomes", "VinFast"],
+      markets: ["Việt Nam"],
+      companySize: "1000+",
+      recentActivities: [{ title: "Mở rộng sản xuất", summary: "Khai trương nhà máy mới", date: "2026-01-01" }],
+    };
+
+    const mockAnalysisData = {
+      executiveSummary: "Vingroup là tập đoàn có quy mô lớn với nhiều tiềm năng kết nối.",
+      criteria: [
+        { name: "Industry Alignment", score: 85, reasoning: "Phù hợp đa ngành." },
+        { name: "Company Size Match", score: 95, reasoning: "Tập đoàn lớn nhất." },
+        { name: "Geographic Relevance", score: 90, reasoning: "Hiện diện toàn quốc." },
+        { name: "Digital Maturity", score: 80, reasoning: "Ứng dụng công nghệ mạnh." },
+        { name: "Recent Activity", score: 90, reasoning: "Nhiều dự án mới." },
+      ],
+      riskFlags: [],
+      suggestedActions: [{ action: "Thiết lập liên hệ", priority: "high", reasoning: "Tiềm năng lớn" }],
+    };
+    llm.setResponse("Tổng hợp thông tin", JSON.stringify(v1MockProfile));
+    llm.setResponse("Phân tích và đánh giá", JSON.stringify(mockAnalysisData));
+
+    // 2. Execute First API Request (Version 1)
+    const req1 = new NextRequest("http://localhost:3000/api/research", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Vingroup",
+        website: "https://vingroup.net",
+      }),
+    });
+
+    const response1 = await POST(req1);
+    expect(response1.status).toBe(200);
+    expect(response1.headers.get("Content-Type")).toBe("text/event-stream");
+
+    // Read SSE output stream
+    const text1 = await response1.text();
+    expect(text1).toContain("event: research:start");
+    expect(text1).toContain("event: profile:ready");
+    expect(text1).toContain("Tập đoàn Vingroup");
+    expect(text1).toContain("event: analysis:ready");
+    expect(text1).toContain("event: done");
+
+    // Verify storage persistence
+    const savedV1 = await storage.getLatestProfile("vingroup");
+    expect(savedV1).not.toBeNull();
+    expect(savedV1?.version).toBe(1);
+    expect(savedV1?.officialName).toBe("Tập đoàn Vingroup");
+
+    // 3. Execute Second API Request (Version 2 - Updated data with diff)
+    const v2MockProfile = {
+      ...v1MockProfile,
+      markets: ["Việt Nam", "Mỹ", "Châu Âu"],
+      products: ["Vinhomes", "VinFast", "VinAI"],
+      description: "Tập đoàn kinh tế tư nhân đa ngành toàn cầu của Việt Nam.",
+    };
+    llm.setResponse("Tổng hợp thông tin", JSON.stringify(v2MockProfile));
+
+    const req2 = new NextRequest("http://localhost:3000/api/research", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Vingroup",
+        website: "https://vingroup.net",
+      }),
+    });
+
+    const response2 = await POST(req2);
+    expect(response2.status).toBe(200);
+
+    const text2 = await response2.text();
+    expect(text2).toContain("event: diff:ready");
+    expect(text2).toContain("event: done");
+
+    // Verify version 2 and diff persistence
+    const savedV2 = await storage.getLatestProfile("vingroup");
+    expect(savedV2?.version).toBe(2);
+    expect(savedV2?.markets).toContain("Mỹ");
+
+    const diffs = await storage.getDiffs(savedV2!.id);
+    expect(diffs.length).toBe(1);
+    expect(diffs[0].fromVersion).toBe(1);
+    expect(diffs[0].toVersion).toBe(2);
+    expect(diffs[0].changes.some((c) => c.field === "markets")).toBe(true);
+  });
+
+  it("rejects invalid request inputs with HTTP 400", async () => {
+    const invalidReq = new NextRequest("http://localhost:3000/api/research", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "", // empty name
+      }),
+    });
+
+    const response = await POST(invalidReq);
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBeDefined();
+  });
+});
