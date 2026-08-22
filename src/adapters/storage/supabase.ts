@@ -3,6 +3,12 @@
 // Implements JSONB multi-version storage for CompanyProfile & ProfileDiff
 // ═══════════════════════════════════════════════════════
 
+// Ensure WebSocket constructor exists in Node.js runtimes < 22 for @supabase/realtime-js
+if (typeof globalThis !== "undefined" && typeof globalThis.WebSocket === "undefined") {
+  // @ts-expect-error fallback mock for RealtimeClient in REST-only mode
+  globalThis.WebSocket = class WebSocket {};
+}
+
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import type { CompanyProfile, ProfileDiff } from "@/lib/types";
 import type { StorageAdapter } from "./types";
@@ -21,6 +27,7 @@ export class SupabaseStorageAdapter implements StorageAdapter {
     this.client = createClient(url, key, {
       auth: {
         persistSession: false,
+        autoRefreshToken: false,
       },
     });
   }
