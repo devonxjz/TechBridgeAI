@@ -1,25 +1,23 @@
 // ═══════════════════════════════════════════════════════
-// TinyFish Scraper Adapter (with resilient fallback)
+// TinyFish Scraper Adapter
 // ═══════════════════════════════════════════════════════
 
-import type { ScraperAdapter, ScrapedContent } from "./types";
+import { ScrapeError, type ScraperAdapter, type ScrapedContent } from "./types";
 
 interface TinyFishResponse {
   title?: string;
   content?: string;
   text?: string;
   html?: string;
-  metadata?: Record<string, string>;
+  metadata?: Record<string, unknown>;
 }
 
 export class TinyFishScraperAdapter implements ScraperAdapter {
-  private apiKey: string;
-  private baseUrl: string;
-
-  constructor(apiKey: string, baseUrl = "https://api.tinyfish.app") {
-    this.apiKey = apiKey;
-    this.baseUrl = baseUrl;
-  }
+  constructor(
+    private readonly apiKey: string,
+    private readonly baseUrl = "https://api.tinyfish.app",
+    private readonly timeoutMs = 8_000,
+  ) {}
 
   async extract(url: string): Promise<ScrapedContent> {
     try {
@@ -30,64 +28,55 @@ export class TinyFishScraperAdapter implements ScraperAdapter {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ url }),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
 
-      if (response.ok) {
-        const data = (await response.json()) as TinyFishResponse;
-        const text = data.content ?? data.text ?? "";
-        if (text.length > 50) {
-          return {
-            url,
-            title: data.title ?? "",
-            text,
-            html: data.html,
-            metadata: data.metadata,
-          };
-        }
+      if (response.status === 429) {
+        throw new ScrapeError("TinyFish rate limited", "tinyfish", "rate_limited", false);
       }
-    } catch {
-      // Fallback to direct public extraction if TinyFish API is unreachable
-    }
 
-    // Direct fetch fallback
-    try {
-      const res = await fetch(url, {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          Accept: "text/html,application/xhtml+xml",
+      if (!response.ok) {
+        throw new ScrapeError(
+          `TinyFish upstream error: ${response.status} ${response.statusText}`,
+          "tinyfish",
+          "upstream_error",
+        );
+      }
+
+      const data = (await response.json()) as TinyFishResponse;
+      const text = data.content ?? data.text ?? "";
+
+      if (text.length <= 50) {
+        throw new ScrapeError("TinyFish returned empty content", "tinyfish", "empty");
+      }
+
+      return {
+        url,
+        title: data.title ?? "",
+        text,
+        html: data.html,
+        metadata: {
+          ...data.metadata,
+          provider: "tinyfish",
         },
-        signal: AbortSignal.timeout(8000),
-      });
-
-      if (res.ok) {
-        const html = await res.text();
-        const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-        const title = titleMatch ? titleMatch[1].trim() : "";
-        // Strip scripts, styles, and tags
-        const cleanText = html
-          .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
-          .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
-          .replace(/<[^>]+>/g, " ")
-          .replace(/\s+/g, " ")
-          .trim();
-
-        if (cleanText.length > 50) {
-          return {
-            url,
-            title,
-            text: cleanText.slice(0, 10000),
-          };
-        }
+      };
+    } catch (err: unknown) {
+      if (err instanceof ScrapeError) {
+        throw err;
       }
-    } catch {
-      // Fallback
-    }
 
-    return {
-      url,
-      title: `Trang web ${url}`,
-      text: `Thông tin doanh nghiệp từ website ${url}. Cung cấp các sản phẩm, giải pháp và dịch vụ tại thị trường Việt Nam.`,
-    };
+      if (
+        err instanceof Error &&
+        (err.name === "AbortError" || err.name === "TimeoutError")
+      ) {
+        throw new ScrapeError("TinyFish request timed out", "tinyfish", "timeout");
+      }
+
+      throw new ScrapeError(
+        `TinyFish request failed: ${err instanceof Error ? err.message : String(err)}`,
+        "tinyfish",
+        "upstream_error",
+      );
+    }
   }
 }
