@@ -14,11 +14,11 @@
 ## 🌟 Tính Năng Nổi Bật
 
 * **Multi-source Research Pipeline:** Tự động tổng hợp thông tin từ 5 nguồn độc lập:
-  * 🌐 Web Search (Google / Serper / Mock)
-  * 📄 Website Scraping (TinyFish / Direct HTML extraction)
-  * 📰 Tin tức kinh doanh & Báo chí (CafeF, Báo Đầu tư, VnExpress...)
-  * 🏛️ Cổng thông tin Đăng ký Kinh doanh & Mã số thuế
-  * 💼 Hồ sơ chuyên gia & Nhân sự chủ chốt
+  * 🌐 **Web Search:** Google Serper API / Mock search.
+  * 📄 **Tiered Website Scraper:** Chuỗi fallback 3 cấp `SafeDirect → Jina Reader → TinyFish` với SSRF protection, DNS pinning, stream limit và không tạo evidence giả.
+  * 📰 **Tin tức kinh doanh:** CafeF, Báo Đầu tư, VnExpress...
+  * 🏛️ **Business Registry:** Tích hợp trực tiếp **VietQR Business API** qua `taxId` với fallback sang tra cứu aggregator / search.
+  * 💼 **Hồ sơ chuyên gia & LinkedIn:** Bóc tách dữ liệu nhân sự chủ chốt.
 * **Real-time SSE Streaming:** Trực quan hóa tiến trình thu thập và phân tích dữ liệu dạng timeline real-time.
 * **OpenAI Structured Profile Builder:** Tự động chuẩn hóa và trích xuất cấu trúc hồ sơ doanh nghiệp (`CompanyProfile`) với độ tin cậy và nguồn trích dẫn rõ ràng.
 * **Analyst Module & Collaboration Fit Score:** Chấm điểm mức độ phù hợp hợp tác (0-100) theo 5 tiêu chí trọng số:
@@ -33,7 +33,7 @@
 
 ---
 
-## 🏗️ Kiến Trúc Hệ Thống & Sơ Đồ Kỹ Thuật (Architecture Diagrams)
+## 🏗️ Kiến Trúc Hệ Thống (Architecture Diagrams)
 
 ### 1. Kiến Trúc Phân Lớp (Hexagonal / Ports & Adapters Architecture)
 
@@ -55,13 +55,15 @@ graph TB
     PortLLM["LLMAdapter"]
     PortSearch["SearchAdapter"]
     PortScraper["ScraperAdapter"]
+    PortRegistry["RegistryAdapter"]
     PortStorage["StorageAdapter"]
   end
 
   subgraph Adapters ["4. Infrastructure Adapters"]
-    OpenAI["OpenAI (gpt-4o-mini) / Gemini / Mock"]
+    OpenAI["OpenAI (gpt-4o-mini) / Mock"]
     Serper["Google Search / Serper / Mock"]
-    TinyFish["TinyFish Scraper / Direct HTML / Mock"]
+    Tiered["Tiered Scraper (Direct -> Jina -> TinyFish)"]
+    VietQR["VietQR Business Registry / Mock"]
     Supabase["Supabase PostgreSQL (JSONB) / Memory"]
   end
 
@@ -72,6 +74,7 @@ graph TB
 
   RM --> PortSearch
   RM --> PortScraper
+  RM --> PortRegistry
   PM --> PortLLM
   PM --> DE
   AM --> PortLLM
@@ -79,170 +82,92 @@ graph TB
 
   PortLLM --> OpenAI
   PortSearch --> Serper
-  PortScraper --> TinyFish
+  PortScraper --> Tiered
+  PortRegistry --> VietQR
   PortStorage --> Supabase
 ```
 
 ---
 
-### 2. Luồng Xử Lý Dữ Liệu Thời Gian Thực (Data Flow & Streaming Lifecycle)
+## 🚀 Cấu Hình & Biến Môi Trường (Configuration & Reliability)
 
-```mermaid
-sequenceDiagram
-  autonumber
-  actor User as 👤 Người dùng
-  participant Frontend as 🖥️ React UI
-  participant API as ⚡ API Route (/api/research)
-  participant Research as 🔍 ResearchModule (5 Sources)
-  participant Profile as 🤖 ProfileModule (LLM)
-  participant Storage as 🗄️ Supabase PostgreSQL
-  participant Analyst as 📊 AnalystModule
+### File `.env.local` mẫu
 
-  User->>Frontend: Nhập tên công ty & Bấm 'Nghiên cứu'
-  Frontend->>API: POST /api/research (EventSource stream)
-  API-->>Frontend: event: research:start
-
-  loop Thu thập 5 nguồn độc lập (Timeout & Fallback Guard)
-    Research->>Research: Cào Web, Tin tức, Tra cứu MST, Bóc tách Website
-    Research-->>API: Yield RawFinding & Progress
-    API-->>Frontend: event: research:progress & research:finding
-  end
-
-  API-->>Frontend: event: profile:building
-  Profile->>Profile: Gọi OpenAI Structured Output (JSON Schema)
-  Profile-->>API: CompanyProfile (v1 hoặc v2)
-  
-  API->>Storage: getLatestProfile(companyId)
-  Storage-->>API: previousProfile (nếu có)
-
-  alt Đã có phiên bản cũ trong DB
-    Profile->>Profile: diffProfiles(current, previous)
-    API->>Storage: saveDiff(diff)
-    API-->>Frontend: event: diff:ready (What Changed?)
-  end
-
-  API->>Storage: saveProfile(currentProfile)
-  API-->>Frontend: event: profile:ready
-
-  API->>Analyst: analyze(profile, context)
-  Analyst->>Analyst: Chấm 5 tiêu chí Fit Score, Risk Flags, Next Actions
-  Analyst-->>API: AnalysisReport
-  API-->>Frontend: event: analysis:ready
-  API-->>Frontend: event: done
-```
-
----
-
-### 3. Mô Hình Lưu Trữ Đa Phiên Bản (Supabase JSONB Entity Diagram)
-
-```mermaid
-erDiagram
-  COMPANY_PROFILES {
-    string id PK "slugify(name), ví dụ: fpt-corporation"
-    int version PK "Auto-increment: 1, 2, 3..."
-    string official_name "Tên pháp lý chính thức"
-    jsonb data "Toàn bộ CompanyProfile Object"
-    timestamp created_at "UTC Timestamp"
-    timestamp updated_at "UTC Timestamp"
-  }
-
-  COMPANY_DIFFS {
-    string id PK "companyId_fromVersion_toVersion"
-    string company_id FK "Liên kết ID công ty"
-    int from_version "Phiên bản gốc"
-    int to_version "Phiên bản đích"
-    jsonb data "Danh sách FieldChange & Summary"
-    timestamp created_at "UTC Timestamp"
-  }
-
-  COMPANY_PROFILES ||--o{ COMPANY_DIFFS : "tracks changes between versions"
-```
-
----
-
-### 4. Khung Đánh Giá Điểm Phù Hợp Hợp Tác (Collaboration Fit Score Model)
-
-```mermaid
-pie title Trọng số 5 Tiêu chí Collaboration Fit Score (Tổng 100%)
-  "Industry Alignment (Ngành nghề bổ trợ)" : 30
-  "Recent Activity (Hoạt động kinh doanh gần đây)" : 20
-  "Company Size Match (Quy mô tổ chức phù hợp)" : 20
-  "Geographic Relevance (Địa bàn & Thị trường)" : 15
-  "Digital Maturity (Mức độ số hóa & Hiện diện)" : 15
-```
-
-| Tiêu chí | Trọng số | Định nghĩa đánh giá |
-| :--- | :---: | :--- |
-| **Industry Alignment** | **30%** | Ngành kinh doanh của đối tác có liên quan hoặc tạo giá trị cộng hưởng trực tiếp. |
-| **Recent Activity** | **20%** | Các hoạt động ra mắt sản phẩm, mở rộng thị trường, gọi vốn hoặc ký kết gần đây. |
-| **Company Size Match** | **20%** | Quy mô nhân sự và thị phần có cân xứng với năng lực hợp tác. |
-| **Geographic Relevance** | **15%** | Mức độ bao phủ thị trường (Việt Nam, Khu vực Đông Nam Á, Toàn cầu). |
-| **Digital Maturity** | **15%** | Mức độ ứng dụng công nghệ, chất lượng website, kênh truyền thông số. |
-
----
-
-## 🚀 Cài Đặt & Chạy Cục Bộ
-
-### 1. Clone repository
-```bash
-git clone https://github.com/devonxjz/TechBridgeAI.git
-cd TechBridgeAI
-```
-
-### 2. Cài đặt dependencies
-```bash
-npm install
-```
-
-### 3. Cấu hình file môi trường
-Tạo file `.env.local` từ mẫu `.env.example`:
-```bash
-cp .env.example .env.local
-```
-
-Điền các thông số API:
-```env
+```dotenv
 # LLM
-LLM_PROVIDER=openai
+LLM_PROVIDER=openai              # openai | mock
 OPENAI_API_KEY=sk-...
 
 # Search
-SEARCH_PROVIDER=mock      # mock | serper
+SEARCH_PROVIDER=mock             # serper | mock
+SERPER_API_KEY=...
 
-# Scraper
-SCRAPER_PROVIDER=tinyfish # tinyfish | mock
-TINYFISH_API_KEY=sk-tinyfish-...
+# Scraper Provider (tiered | tinyfish | mock)
+SCRAPER_PROVIDER=tiered
+SCRAPER_DIRECT_ENABLED=true
+SCRAPER_JINA_ENABLED=true
+SCRAPER_TINYFISH_ENABLED=true
+JINA_API_KEY=
+TINYFISH_API_KEY=
+SCRAPER_TIMEOUT_MS=8000
+SCRAPER_MAX_RESPONSE_BYTES=1048576
+SCRAPER_MAX_REDIRECTS=3
+MAX_SCRAPE_PAGES_PER_RESEARCH=5
 
-# Storage Provider — Supabase PostgreSQL
-STORAGE_PROVIDER=supabase
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-anon-key
+# Registry Provider (VietQR)
+VIETQR_ENABLED=true
+
+# Storage Provider
+STORAGE_PROVIDER=supabase        # supabase | memory
+SUPABASE_URL=https://xyz.supabase.co
+SUPABASE_ANON_KEY=...
+
+# Resource Guards
+MAX_CONCURRENT_RESEARCH=1
+SOURCE_TIMEOUT_MS=30000
+MAX_RESEARCH_PER_DAY=50
+MAX_TOKENS_PER_DAY=500000
 ```
 
-### 4. Khởi tạo Cơ sở dữ liệu Supabase
-Chạy đoạn mã SQL trong file [`supabase/schema.sql`](supabase/schema.sql) tại **SQL Editor** trên Supabase Dashboard.
+### Cơ chế Missing-Key & Fallback Chain
+- `SCRAPER_PROVIDER=tiered`: Tự động khởi tạo chuỗi `SafeDirect → Jina Reader → TinyFish`.
+  - Nếu thiếu `JINA_API_KEY`, tier Jina tự động được bỏ qua mà không làm crash ứng dụng.
+  - Nếu thiếu `TINYFISH_API_KEY`, tier TinyFish tự động được bỏ qua.
+  - Luôn có `SafeDirect` bảo vệ với cơ chế SSRF Validation, DNS pinning và linear HTML cleaner.
+- `VIETQR_ENABLED=true`: Khi input có `taxId`, hệ thống tự động tra cứu VietQR trước và cache kết quả trong bộ nhớ (7 ngày). Nếu lỗi/rate-limited hoặc không có `taxId`, hệ thống chuyển tiếp sang aggregator search hiện tại.
 
-### 5. Khởi chạy Development Server
-```bash
-npm run dev
-```
-Truy cập [http://localhost:3000](http://localhost:3000) trên trình duyệt.
+### Rollback không cần revert code
+
+| Tình huống | Cấu hình Env | Chuỗi xử lý |
+| :--- | :--- | :--- |
+| Direct scraper gặp lỗi mạng / firewall | `SCRAPER_DIRECT_ENABLED=false` | Jina → TinyFish |
+| Jina Reader 429 kéo dài | `SCRAPER_JINA_ENABLED=false` | Direct → TinyFish |
+| TinyFish sự cố / tiết kiệm chi phí | `SCRAPER_TINYFISH_ENABLED=false` | Direct → Jina |
+| Rollback toàn bộ về TinyFish độc lập | `SCRAPER_PROVIDER=tinyfish` | TinyFish-only |
+| VietQR API sự cố | `VIETQR_ENABLED=false` | Aggregator / Search fallback |
+| Môi trường thử nghiệm / Test offline | `SCRAPER_PROVIDER=mock` | Mock Scraper |
 
 ---
 
-## 🧪 Kiểm Thử (Testing)
+## 🧪 Kiểm Thử & Xác Thực (Testing & Verification)
 
-Chạy bộ kiểm thử tự động với Vitest (10 test suites, 39 tests Unit, Integration & E2E):
+Chạy bộ kiểm thử tự động với Vitest (14 test suites, 87 unit, integration & E2E tests):
 ```bash
 npm test
 ```
 
-Kiểm tra định kiểu TypeScript:
+Kiểm tra kiểu dữ liệu với TypeScript 7 và Next route types:
 ```bash
 npm run typecheck
+npm run typecheck:legacy
 ```
 
-Build production:
+Kiểm tra mã nguồn với ESLint:
+```bash
+npm run lint
+```
+
+Build production bundle:
 ```bash
 npm run build
 ```

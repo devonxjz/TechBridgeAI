@@ -4,6 +4,7 @@
 
 import http from "node:http";
 import https from "node:https";
+import type dns from "node:dns";
 import { ScrapeError, type ScraperAdapter, type ScrapedContent } from "./types";
 import { resolvePublicTarget } from "./url-safety";
 
@@ -136,12 +137,15 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
           agent: false,
           lookup: (
             _hostname: string,
-            optsOrCallback: any,
-            maybeCallback?: any,
+            optsOrCallback: unknown,
+            maybeCallback?: unknown,
           ) => {
-            const cb = typeof optsOrCallback === "function" ? optsOrCallback : maybeCallback;
+            const cb = (typeof optsOrCallback === "function" ? optsOrCallback : maybeCallback) as
+              | ((err: NodeJS.ErrnoException | null, address: string | dns.LookupAddress[], family?: number) => void)
+              | undefined;
+
             if (typeof cb === "function") {
-              if (typeof optsOrCallback === "object" && optsOrCallback?.all) {
+              if (typeof optsOrCallback === "object" && (optsOrCallback as { all?: boolean })?.all) {
                 cb(null, [{ address: target.address, family: target.family }]);
               } else {
                 cb(null, target.address, target.family);
@@ -241,7 +245,8 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
           }
 
           // Content-Disposition
-          const dispositionValues = (res as any).headersDistinct?.["content-disposition"] ||
+          const headersDistinct = (res as { headersDistinct?: Record<string, string[]> }).headersDistinct;
+          const dispositionValues = headersDistinct?.["content-disposition"] ||
             (res.headers["content-disposition"] ? [res.headers["content-disposition"]] : []);
           for (const disp of dispositionValues) {
             if (typeof disp === "string" && disp.toLowerCase().includes("attachment")) {
@@ -259,7 +264,7 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
           }
 
           // Content-Type
-          const contentTypeValues = (res as any).headersDistinct?.["content-type"] ||
+          const contentTypeValues = headersDistinct?.["content-type"] ||
             (res.headers["content-type"] ? [res.headers["content-type"]] : []);
           if (contentTypeValues.length > 1) {
             const first = contentTypeValues[0];
@@ -293,7 +298,7 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
           }
 
           // Content-Length
-          const contentLengthValues = (res as any).headersDistinct?.["content-length"] ||
+          const contentLengthValues = headersDistinct?.["content-length"] ||
             (res.headers["content-length"] ? [res.headers["content-length"]] : []);
           if (contentLengthValues.length > 1) {
             const first = contentLengthValues[0];
@@ -391,7 +396,7 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
 
         activeReq = req;
 
-        req.on("error", (err: any) => {
+        req.on("error", (err: Error & { code?: string }) => {
           settleOnce(() => {
             if (err.code === "ECONNRESET" || err.code === "ETIMEDOUT") {
               reject(new ScrapeError(`Direct fetch connection error: ${err.message}`, "direct", "timeout"));

@@ -130,6 +130,9 @@ Profile Generator + Diff Engine
 | Rate limit / blocking khi scrape | Trung bình | Dùng Jina/Firecrawl + cache + respectful crawling |
 | Thông tin lỗi thời / sai | Trung bình | Luôn kèm timestamp + nguồn + confidence score |
 | Privacy | Thấp-Trung bình | Chỉ dùng dữ liệu công khai, không lưu dữ liệu cá nhân nhạy cảm |
+| Indirect prompt injection từ website | Trung bình-Cao | Coi scraped text là untrusted data, giữ citation/confidence; thêm prompt isolation trước public production |
+
+**Known security limitation — indirect prompt injection:** Nội dung lấy từ website đi vào LLM để dựng profile và có thể chứa chỉ thị độc hại. Structured output chỉ ép đúng schema, không bảo đảm các giá trị trong schema là đúng. Trước khi public production, system prompt phải nói rõ scraped content là dữ liệu, không phải hướng dẫn; từng finding cần được đặt trong delimiter/data block và kiểm thử bằng nội dung đối kháng. Đây là defense-in-depth, không phải biện pháp loại bỏ hoàn toàn prompt injection.
 
 ### 9. Success Metrics (cho cuộc thi + production)
 
@@ -156,4 +159,3 @@ Bạn muốn mình đi sâu tiếp phần nào trước?
 3. Roadmap kỹ thuật tuần 1–2 (code structure)
 4. Demo script chi tiết
 5. Hoặc bắt đầu thiết kế UI/UX wireframe
-

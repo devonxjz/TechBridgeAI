@@ -14,6 +14,7 @@ import {
 import type { CompanyInput } from "@/lib/types";
 import type { RegistryAdapter } from "@/adapters/registry";
 import { RegistryError } from "@/adapters/registry";
+import type { ScraperAdapter } from "@/adapters/scraper";
 
 describe("Research Sources Unit Tests", () => {
   let search: MockSearchAdapter;
@@ -247,7 +248,7 @@ describe("Research Sources Unit Tests", () => {
 
       const adapter = createScraperAdapter();
       expect(adapter.constructor.name).toBe("TieredScraperAdapter");
-      const tiers = (adapter as any).tiers;
+      const tiers = (adapter as unknown as { tiers: ScraperAdapter[] }).tiers;
       expect(tiers.length).toBe(3);
       expect(tiers[0].constructor.name).toBe("SafeDirectScraperAdapter");
       expect(tiers[1].constructor.name).toBe("JinaReaderScraperAdapter");
@@ -262,7 +263,7 @@ describe("Research Sources Unit Tests", () => {
 
       const adapter = createScraperAdapter();
       expect(adapter.constructor.name).toBe("TieredScraperAdapter");
-      const tiers = (adapter as any).tiers;
+      const tiers = (adapter as unknown as { tiers: ScraperAdapter[] }).tiers;
       expect(tiers.length).toBe(1);
       expect(tiers[0].constructor.name).toBe("SafeDirectScraperAdapter");
     });
@@ -274,7 +275,7 @@ describe("Research Sources Unit Tests", () => {
       process.env.TINYFISH_API_KEY = "tinyfish-key";
 
       const adapter = createScraperAdapter();
-      const tiers = (adapter as any).tiers;
+      const tiers = (adapter as unknown as { tiers: ScraperAdapter[] }).tiers;
       expect(tiers.length).toBe(2);
       expect(tiers[0].constructor.name).toBe("JinaReaderScraperAdapter");
       expect(tiers[1].constructor.name).toBe("TinyFishScraperAdapter");

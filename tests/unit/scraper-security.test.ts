@@ -123,7 +123,7 @@ describe("resolvePublicTarget", () => {
     vi.spyOn(dns, "lookup").mockResolvedValueOnce([
       { address: "8.8.8.8", family: 4 },
       { address: "192.168.1.1", family: 4 },
-    ] as any);
+    ] as never);
 
     await expect(resolvePublicTarget("https://mixed.example.com")).rejects.toThrow(ScrapeError);
   });
@@ -132,7 +132,7 @@ describe("resolvePublicTarget", () => {
     vi.spyOn(dns, "lookup").mockRejectedValueOnce(new Error("ENOTFOUND"));
     await expect(resolvePublicTarget("https://notfound.example.com")).rejects.toThrow(ScrapeError);
 
-    vi.spyOn(dns, "lookup").mockResolvedValueOnce([] as any);
+    vi.spyOn(dns, "lookup").mockResolvedValueOnce([] as never);
     await expect(resolvePublicTarget("https://empty-dns.example.com")).rejects.toThrow(ScrapeError);
   });
 });
@@ -149,8 +149,7 @@ describe("SafeDirectScraperAdapter HTML and response bounds", () => {
     const unclosedHtml = "<html><body>" + "<script>var x = 1; ".repeat(16384) + "Hello World</body></html>";
     const startTime = Date.now();
     
-    // We can test extractHtmlText directly via internal or extract
-    const clean = (adapter as any).cleanHtml(unclosedHtml);
+    const clean = adapter.cleanHtml(unclosedHtml);
     const duration = Date.now() - startTime;
 
     expect(duration).toBeLessThan(3000);

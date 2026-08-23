@@ -123,8 +123,8 @@ function expandIpv6(ip: string): number[] | null {
   const parts = ip.split("::");
   if (parts.length > 2) return null;
 
-  let left = parts[0] ? parts[0].split(":").filter(Boolean) : [];
-  let right = parts.length === 2 && parts[1] ? parts[1].split(":").filter(Boolean) : [];
+  const left = parts[0] ? parts[0].split(":").filter(Boolean) : [];
+  const right = parts.length === 2 && parts[1] ? parts[1].split(":").filter(Boolean) : [];
 
   if (parts.length === 1 && left.length !== 8) return null;
 

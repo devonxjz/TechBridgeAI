@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { JinaReaderScraperAdapter } from "@/adapters/scraper/jina";
 import { TieredScraperAdapter } from "@/adapters/scraper/tiered";
 import { TinyFishScraperAdapter } from "@/adapters/scraper/tinyfish";
-import { ScrapeError, type ScraperAdapter, type ScrapedContent } from "@/adapters/scraper/types";
+import { ScrapeError, type ScraperAdapter } from "@/adapters/scraper/types";
 
 describe("TinyFishScraperAdapter", () => {
   afterEach(() => {
