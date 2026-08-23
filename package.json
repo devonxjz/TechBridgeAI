@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "typecheck:legacy": "tsc6 --noEmit"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
@@ -22,10 +24,11 @@
     "@types/node": "^20.19.43",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@typescript/native": "npm:typescript@7.0.2",
     "eslint": "^9",
     "eslint-config-next": "16.3.2",
     "tailwindcss": "^4",
-    "typescript": "^5",
+    "typescript": "npm:@typescript/typescript6@6.0.2",
     "vitest": "^4.1.11"
   }
 }
