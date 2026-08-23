@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { MockSearchAdapter } from "@/adapters/search/mock";
 import { MockScraperAdapter } from "@/adapters/scraper/mock";
 import { searchWeb } from "@/modules/research/sources/web-search";
@@ -12,6 +12,8 @@ import {
   getGuards,
 } from "@/config";
 import type { CompanyInput } from "@/lib/types";
+import type { RegistryAdapter } from "@/adapters/registry";
+import { RegistryError } from "@/adapters/registry";
 
 describe("Research Sources Unit Tests", () => {
   let search: MockSearchAdapter;
@@ -121,7 +123,35 @@ describe("Research Sources Unit Tests", () => {
   });
 
   describe("registry source", () => {
-    it("falls back through aggregator -> search hierarchy", async () => {
+    it("uses VietQR first when taxId is provided and succeeds with high confidence", async () => {
+      const mockRegistry: RegistryAdapter = {
+        findByTaxId: vi.fn().mockResolvedValue({
+          taxId: "0101234567",
+          name: "CÔNG TY CỔ PHẦN FPT",
+          internationalName: "FPT CORPORATION",
+          shortName: "FPT",
+          address: "Số 10 Phạm Văn Bạch",
+        }),
+      };
+
+      const input: CompanyInput = { name: "FPT", taxId: "0101234567" };
+      const findings = await fetchRegistryData(input, search, scraper, mockRegistry);
+
+      expect(mockRegistry.findByTaxId).toHaveBeenCalledWith("0101234567");
+      expect(findings.length).toBe(1);
+      expect(findings[0].source).toBe("registry");
+      expect(findings[0].confidence).toBe(0.95);
+      expect(findings[0].metadata?.via).toBe("vietqr");
+      expect(findings[0].content).toContain("CÔNG TY CỔ PHẦN FPT");
+      expect(findings[0].content).toContain("0101234567");
+    });
+
+    it("falls back through aggregator -> search when VietQR fails or returns null", async () => {
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const mockRegistry: RegistryAdapter = {
+        findByTaxId: vi.fn().mockRejectedValue(new RegistryError("Rate limit", "rate_limited")),
+      };
+
       search.setResults("masothue.com", [
         { title: "MST FPT", url: "https://masothue.com/0101234-fpt", snippet: "MST: 0101234, Dai dien: Truong Gia Binh" },
       ]);
@@ -132,10 +162,44 @@ describe("Research Sources Unit Tests", () => {
       });
 
       const input: CompanyInput = { name: "FPT", taxId: "0101234567" };
-      const findings = await fetchRegistryData(input, search, scraper);
+      const findings = await fetchRegistryData(input, search, scraper, mockRegistry);
+
       expect(findings.length).toBe(1);
       expect(findings[0].source).toBe("registry");
       expect(findings[0].content).toContain("0101234567");
+      expect(findings[0].confidence).toBe(0.75);
+
+      const logs = logSpy.mock.calls.map(([arg]) => {
+        try {
+          return JSON.parse(arg);
+        } catch {
+          return null;
+        }
+      }).filter(Boolean);
+
+      expect(logs.some((l) => l.event === "registry_fallback" && l.reason === "rate_limited")).toBe(true);
+    });
+
+    it("falls back directly through aggregator without calling VietQR when taxId is missing", async () => {
+      const mockRegistry: RegistryAdapter = {
+        findByTaxId: vi.fn(),
+      };
+
+      search.setResults("masothue.com", [
+        { title: "MST FPT", url: "https://masothue.com/0101234-fpt", snippet: "MST: 0101234, Dai dien: Truong Gia Binh" },
+      ]);
+      scraper.setPage("https://masothue.com/0101234-fpt", {
+        url: "https://masothue.com/0101234-fpt",
+        title: "Thong tin MST FPT",
+        text: "Cong ty Co phan FPT, Ma so thue 0101234567, Ngay cap giay phep kinh doanh nam 1988 boi So Ke hoach va Dau tu Ha Noi. Dia chi: Toa nha FPT, Pho Duy Tan, Cau Giay, Ha Noi.",
+      });
+
+      const input: CompanyInput = { name: "FPT" };
+      const findings = await fetchRegistryData(input, search, scraper, mockRegistry);
+
+      expect(mockRegistry.findByTaxId).not.toHaveBeenCalled();
+      expect(findings.length).toBe(1);
+      expect(findings[0].source).toBe("registry");
     });
   });
 

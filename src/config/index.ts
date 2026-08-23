@@ -7,6 +7,7 @@ import type { LLMAdapter } from "@/adapters/llm/types";
 import type { SearchAdapter } from "@/adapters/search/types";
 import type { ScraperAdapter } from "@/adapters/scraper/types";
 import type { StorageAdapter } from "@/adapters/storage/types";
+import type { RegistryAdapter } from "@/adapters/registry/types";
 
 import { OpenAIAdapter } from "@/adapters/llm/openai";
 import { MockLLMAdapter } from "@/adapters/llm/mock";
@@ -19,6 +20,7 @@ import {
   TieredScraperAdapter,
   MockScraperAdapter,
 } from "@/adapters/scraper";
+import { VietQrRegistryAdapter } from "@/adapters/registry";
 import { MemoryStorageAdapter } from "@/adapters/storage/memory";
 import { SupabaseStorageAdapter } from "@/adapters/storage/supabase";
 
@@ -56,6 +58,7 @@ export function getGuards(): ResourceGuards {
 let _llm: LLMAdapter | null = null;
 let _search: SearchAdapter | null = null;
 let _scraper: ScraperAdapter | null = null;
+let _registry: RegistryAdapter | null = null;
 let _storage: StorageAdapter | null = null;
 
 export function createLLMAdapter(): LLMAdapter {
@@ -157,6 +160,20 @@ export function createScraperAdapter(): ScraperAdapter {
   throw new Error(`Unknown SCRAPER_PROVIDER: ${provider}`);
 }
 
+export function createRegistryAdapter(): RegistryAdapter {
+  if (_registry) return _registry;
+
+  const enabled = process.env.VIETQR_ENABLED !== "false";
+  if (enabled) {
+    _registry = new VietQrRegistryAdapter();
+  } else {
+    _registry = {
+      findByTaxId: async () => null,
+    };
+  }
+  return _registry;
+}
+
 export function createStorageAdapter(): StorageAdapter {
   if (_storage) return _storage;
 
@@ -181,6 +198,7 @@ export function resetAdapters(): void {
   _llm = null;
   _search = null;
   _scraper = null;
+  _registry = null;
   _storage = null;
 }
 

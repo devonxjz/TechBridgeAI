@@ -3,6 +3,7 @@ import { createResearchModule } from "@/modules/research";
 import { MockLLMAdapter } from "@/adapters/llm/mock";
 import { MockSearchAdapter } from "@/adapters/search/mock";
 import { MockScraperAdapter } from "@/adapters/scraper/mock";
+import type { RegistryAdapter } from "@/adapters/registry";
 import type { ResourceGuards } from "@/config";
 import type { CompanyInput, ResearchEvent } from "@/lib/types";
 
@@ -10,6 +11,7 @@ describe("ResearchModule Integration Tests", () => {
   let llm: MockLLMAdapter;
   let search: MockSearchAdapter;
   let scraper: MockScraperAdapter;
+  let registry: RegistryAdapter;
   const guards: ResourceGuards = {
     maxConcurrentResearch: 1,
     sourceTimeoutMs: 5000,
@@ -26,6 +28,9 @@ describe("ResearchModule Integration Tests", () => {
     llm = new MockLLMAdapter();
     search = new MockSearchAdapter();
     scraper = new MockScraperAdapter();
+    registry = {
+      findByTaxId: async () => null,
+    };
   });
 
   it("orchestrates multi-source research and streams progress events", async () => {
@@ -38,7 +43,7 @@ describe("ResearchModule Integration Tests", () => {
       text: "Viettel Military Telecommunications Group",
     });
 
-    const researchModule = createResearchModule({ llm, search, scraper, guards });
+    const researchModule = createResearchModule({ llm, search, scraper, registry, guards });
 
     const input: CompanyInput = {
       name: "Viettel",
@@ -83,7 +88,7 @@ describe("ResearchModule Integration Tests", () => {
       return [{ title: "FPT Info", url: "https://fpt.com.vn", snippet: "FPT snippet" }];
     };
 
-    const researchModule = createResearchModule({ llm, search, scraper, guards });
+    const researchModule = createResearchModule({ llm, search, scraper, registry, guards });
 
     const input: CompanyInput = { name: "FPT" };
     const events: ResearchEvent[] = [];

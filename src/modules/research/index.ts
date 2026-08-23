@@ -14,6 +14,7 @@ import type {
 import type { LLMAdapter } from "@/adapters/llm/types";
 import type { SearchAdapter } from "@/adapters/search/types";
 import type { ScraperAdapter } from "@/adapters/scraper/types";
+import type { RegistryAdapter } from "@/adapters/registry/types";
 import type { ResourceGuards } from "@/config";
 import { searchWeb } from "./sources/web-search";
 import { scrapeWebsite } from "./sources/website";
@@ -25,10 +26,11 @@ export interface ResearchModule {
   research(input: CompanyInput): AsyncGenerator<ResearchEvent, void, unknown>;
 }
 
-interface ResearchDeps {
+export interface ResearchDeps {
   llm: LLMAdapter;
   search: SearchAdapter;
   scraper: ScraperAdapter;
+  registry: RegistryAdapter;
   guards: ResourceGuards;
 }
 
@@ -59,7 +61,13 @@ export function createResearchModule(deps: ResearchDeps): ResearchModule {
         },
         {
           name: "registry",
-          fn: () => fetchRegistryData(input, deps.search, deps.scraper),
+          fn: () =>
+            fetchRegistryData(
+              input,
+              deps.search,
+              deps.scraper,
+              deps.registry,
+            ),
         },
         {
           name: "linkedin",

@@ -11,6 +11,7 @@ import {
   createLLMAdapter,
   createSearchAdapter,
   createScraperAdapter,
+  createRegistryAdapter,
   createStorageAdapter,
   getGuards,
 } from "@/config";
@@ -27,12 +28,14 @@ export async function POST(req: NextRequest) {
     const llm = createLLMAdapter();
     const search = createSearchAdapter();
     const scraper = createScraperAdapter();
+    const registry = createRegistryAdapter();
     const storage = createStorageAdapter();
 
     const researchModule = createResearchModule({
       llm,
       search,
       scraper,
+      registry,
       guards,
     });
     const profileModule = createProfileModule({ llm });

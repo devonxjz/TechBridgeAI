@@ -5,39 +5,82 @@
 import type { CompanyInput, RawFinding } from "@/lib/types";
 import type { SearchAdapter } from "@/adapters/search/types";
 import type { ScraperAdapter } from "@/adapters/scraper/types";
+import { RegistryError, type RegistryAdapter } from "@/adapters/registry";
 
 /**
  * Fetch company info from Vietnamese business registry sources.
- * Uses a 3-level fallback chain:
- *   1. Aggregator sites (masothue.com, thongtindoanhnghiep.co)
- *   2. Google Search with site: filter for registry
- *   3. General search for tax/registry info
+ * If taxId is provided, queries official VietQR registry first.
+ * If VietQR fails, falls back through aggregator -> search hierarchy.
  */
 export async function fetchRegistryData(
   input: CompanyInput,
   searchAdapter: SearchAdapter,
-  scraperAdapter: ScraperAdapter
+  scraperAdapter: ScraperAdapter,
+  registryAdapter?: RegistryAdapter,
 ): Promise<RawFinding[]> {
-  // 1. Try aggregator sites first (most reliable)
+  // 1. Try VietQR if taxId is provided
+  if (input.taxId && registryAdapter) {
+    try {
+      const record = await registryAdapter.findByTaxId(input.taxId);
+      if (record) {
+        const details = [
+          `[Thông tin ĐKKD VietQR]`,
+          `Tên doanh nghiệp: ${record.name}`,
+          `Mã số thuế: ${record.taxId}`,
+          record.internationalName ? `Tên quốc tế: ${record.internationalName}` : null,
+          record.shortName ? `Tên viết tắt: ${record.shortName}` : null,
+          record.address ? `Địa chỉ: ${record.address}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        return [
+          {
+            source: "registry",
+            url: `https://api.vietqr.io/v2/business/${encodeURIComponent(record.taxId)}`,
+            content: details,
+            extractedAt: new Date(),
+            confidence: 0.95, // Official registry record
+            metadata: {
+              via: "vietqr",
+              taxId: record.taxId,
+              name: record.name,
+            },
+          },
+        ];
+      }
+    } catch (err: unknown) {
+      const reason = err instanceof RegistryError ? err.code : "lookup_failed";
+      console.log(
+        JSON.stringify({
+          event: "registry_fallback",
+          reason,
+          taxId: input.taxId,
+        }),
+      );
+    }
+  }
+
+  // 2. Try aggregator sites
   const aggregatorResult = await tryAggregatorSites(
     input,
     searchAdapter,
-    scraperAdapter
+    scraperAdapter,
   );
   if (aggregatorResult.length > 0) return aggregatorResult;
 
-  // 2. Fallback: search registry sites
+  // 3. Fallback: search registry sites
   const registrySearchResult = await tryRegistrySearch(input, searchAdapter);
   if (registrySearchResult.length > 0) return registrySearchResult;
 
-  // 3. Final fallback: general search for registry-type info
+  // 4. Final fallback: general search for registry-type info
   return tryGeneralRegistrySearch(input, searchAdapter);
 }
 
 async function tryAggregatorSites(
   input: CompanyInput,
   searchAdapter: SearchAdapter,
-  scraperAdapter: ScraperAdapter
+  scraperAdapter: ScraperAdapter,
 ): Promise<RawFinding[]> {
   const findings: RawFinding[] = [];
   const searchTerm = input.taxId ?? input.name;
