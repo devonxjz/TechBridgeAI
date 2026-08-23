@@ -9,11 +9,13 @@ import type { SearchAdapter } from "@/adapters/search/types";
 /**
  * Extract information from the company's official website.
  * If no website URL provided, tries to discover it via search.
+ * Strictly respects maxPages budget (including homepage and failed attempts).
  */
 export async function scrapeWebsite(
   input: CompanyInput,
   scraperAdapter: ScraperAdapter,
-  searchAdapter: SearchAdapter
+  searchAdapter: SearchAdapter,
+  maxPages = 5,
 ): Promise<RawFinding[]> {
   const websiteUrl = input.website ?? (await discoverWebsite(input, searchAdapter));
 
@@ -22,27 +24,36 @@ export async function scrapeWebsite(
   }
 
   const findings: RawFinding[] = [];
+  let pagesScraped = 0;
 
   // Scrape main page
-  try {
-    const mainPage = await scraperAdapter.extract(websiteUrl);
-    if (mainPage.text.length > 50) {
-      findings.push({
-        source: "website",
-        url: websiteUrl,
-        content: mainPage.text.slice(0, 10_000), // Cap content length
-        extractedAt: new Date(),
-        confidence: 0.85,
-        metadata: { title: mainPage.title, section: "main" },
-      });
+  if (pagesScraped < maxPages) {
+    pagesScraped++;
+    try {
+      const mainPage = await scraperAdapter.extract(websiteUrl);
+      if (mainPage.text.length > 50) {
+        findings.push({
+          source: "website",
+          url: websiteUrl,
+          content: mainPage.text.slice(0, 10_000), // Cap content length
+          extractedAt: new Date(),
+          confidence: 0.85,
+          metadata: { title: mainPage.title, section: "main" },
+        });
+      }
+    } catch {
+      // Main page failed, continue with subpages
     }
-  } catch {
-    // Main page failed, continue with subpages
   }
 
   // Try to scrape key subpages
   const subpages = ["/about", "/about-us", "/gioi-thieu", "/ve-chung-toi", "/products", "/san-pham"];
   for (const path of subpages) {
+    if (pagesScraped >= maxPages) {
+      break;
+    }
+    pagesScraped++;
+
     try {
       const url = new URL(path, websiteUrl).toString();
       const page = await scraperAdapter.extract(url);
@@ -66,7 +77,7 @@ export async function scrapeWebsite(
 
 async function discoverWebsite(
   input: CompanyInput,
-  searchAdapter: SearchAdapter
+  searchAdapter: SearchAdapter,
 ): Promise<string | null> {
   const results = await searchAdapter.search(
     `"${input.name}" official website`,

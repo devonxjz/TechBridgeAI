@@ -45,7 +45,13 @@ export function createResearchModule(deps: ResearchDeps): ResearchModule {
         },
         {
           name: "website",
-          fn: () => scrapeWebsite(input, deps.scraper, deps.search),
+          fn: () =>
+            scrapeWebsite(
+              input,
+              deps.scraper,
+              deps.search,
+              deps.guards.maxScrapePagesPerResearch,
+            ),
         },
         {
           name: "news",

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { MockSearchAdapter } from "@/adapters/search/mock";
 import { MockScraperAdapter } from "@/adapters/scraper/mock";
 import { searchWeb } from "@/modules/research/sources/web-search";
@@ -6,6 +6,11 @@ import { scrapeWebsite } from "@/modules/research/sources/website";
 import { searchNews } from "@/modules/research/sources/news";
 import { fetchRegistryData } from "@/modules/research/sources/registry";
 import { scrapeLinkedIn } from "@/modules/research/sources/linkedin";
+import {
+  createScraperAdapter,
+  resetAdapters,
+  getGuards,
+} from "@/config";
 import type { CompanyInput } from "@/lib/types";
 
 describe("Research Sources Unit Tests", () => {
@@ -39,7 +44,7 @@ describe("Research Sources Unit Tests", () => {
   });
 
   describe("website source", () => {
-    it("scrapes direct website url and attempts subpages", async () => {
+    it("scrapes direct website url and attempts subpages within maxPages limit", async () => {
       scraper.setPage("https://fpt.com.vn", {
         url: "https://fpt.com.vn",
         title: "FPT Homepage",
@@ -56,10 +61,27 @@ describe("Research Sources Unit Tests", () => {
         website: "https://fpt.com.vn",
       };
 
-      const findings = await scrapeWebsite(input, scraper, search);
+      const findings = await scrapeWebsite(input, scraper, search, 5);
       expect(findings.length).toBeGreaterThanOrEqual(1);
       expect(findings.some((f) => f.content.includes("Leading ICT"))).toBe(true);
       expect(findings.every((f) => f.source === "website")).toBe(true);
+      expect(scraper.callLog.length).toBeLessThanOrEqual(5);
+    });
+
+    it("strictly stops before maxPages + 1 even if all fail", async () => {
+      const input: CompanyInput = {
+        name: "FPT",
+        website: "https://fpt.com.vn",
+      };
+
+      scraper.extract = async (url: string) => {
+        scraper.callLog.push(url);
+        throw new Error("Page error");
+      };
+
+      const findings = await scrapeWebsite(input, scraper, search, 3);
+      expect(findings).toEqual([]);
+      expect(scraper.callLog.length).toBe(3);
     });
 
     it("discovers website via search when website is not provided", async () => {
@@ -73,7 +95,7 @@ describe("Research Sources Unit Tests", () => {
       });
 
       const input: CompanyInput = { name: "VNPT" };
-      const findings = await scrapeWebsite(input, scraper, search);
+      const findings = await scrapeWebsite(input, scraper, search, 5);
       expect(findings.length).toBeGreaterThan(0);
       expect(findings[0].url).toBe("https://vnpt.vn");
     });
@@ -92,7 +114,7 @@ describe("Research Sources Unit Tests", () => {
       };
 
       const findings = await searchNews(input, search);
-      expect(findings.length).toBe(2); // query runs twice for 2 queries
+      expect(findings.length).toBe(2);
       expect(findings.every((f) => !f.url.includes("vingroup.net"))).toBe(true);
       expect(findings[0].source).toBe("news");
     });
@@ -140,6 +162,88 @@ describe("Research Sources Unit Tests", () => {
       const input: CompanyInput = { name: "FPT" };
       const findings = await scrapeLinkedIn(input, scraper);
       expect(findings).toEqual([]);
+    });
+  });
+
+  describe("Scraper Factory and Config composition", () => {
+    const originalEnv = { ...process.env };
+
+    afterEach(() => {
+      process.env = { ...originalEnv };
+      resetAdapters();
+    });
+
+    it("creates tiered adapter with direct, jina, tinyfish when keys are present", () => {
+      process.env.SCRAPER_PROVIDER = "tiered";
+      process.env.SCRAPER_DIRECT_ENABLED = "true";
+      process.env.SCRAPER_JINA_ENABLED = "true";
+      process.env.SCRAPER_TINYFISH_ENABLED = "true";
+      process.env.JINA_API_KEY = "jina-key";
+      process.env.TINYFISH_API_KEY = "tinyfish-key";
+
+      const adapter = createScraperAdapter();
+      expect(adapter.constructor.name).toBe("TieredScraperAdapter");
+      const tiers = (adapter as any).tiers;
+      expect(tiers.length).toBe(3);
+      expect(tiers[0].constructor.name).toBe("SafeDirectScraperAdapter");
+      expect(tiers[1].constructor.name).toBe("JinaReaderScraperAdapter");
+      expect(tiers[2].constructor.name).toBe("TinyFishScraperAdapter");
+    });
+
+    it("skips Jina and TinyFish when keys are missing without crashing", () => {
+      process.env.SCRAPER_PROVIDER = "tiered";
+      process.env.SCRAPER_DIRECT_ENABLED = "true";
+      delete process.env.JINA_API_KEY;
+      delete process.env.TINYFISH_API_KEY;
+
+      const adapter = createScraperAdapter();
+      expect(adapter.constructor.name).toBe("TieredScraperAdapter");
+      const tiers = (adapter as any).tiers;
+      expect(tiers.length).toBe(1);
+      expect(tiers[0].constructor.name).toBe("SafeDirectScraperAdapter");
+    });
+
+    it("creates rollback chain Jina -> TinyFish when direct is disabled", () => {
+      process.env.SCRAPER_PROVIDER = "tiered";
+      process.env.SCRAPER_DIRECT_ENABLED = "false";
+      process.env.JINA_API_KEY = "jina-key";
+      process.env.TINYFISH_API_KEY = "tinyfish-key";
+
+      const adapter = createScraperAdapter();
+      const tiers = (adapter as any).tiers;
+      expect(tiers.length).toBe(2);
+      expect(tiers[0].constructor.name).toBe("JinaReaderScraperAdapter");
+      expect(tiers[1].constructor.name).toBe("TinyFishScraperAdapter");
+    });
+
+    it("throws error when all tiers are disabled or have missing keys", () => {
+      process.env.SCRAPER_PROVIDER = "tiered";
+      process.env.SCRAPER_DIRECT_ENABLED = "false";
+      delete process.env.JINA_API_KEY;
+      delete process.env.TINYFISH_API_KEY;
+
+      expect(() => createScraperAdapter()).toThrow(/No scraper tiers enabled/);
+    });
+
+    it("supports legacy tinyfish provider and mock provider", () => {
+      process.env.SCRAPER_PROVIDER = "tinyfish";
+      process.env.TINYFISH_API_KEY = "tf-key";
+      const tf = createScraperAdapter();
+      expect(tf.constructor.name).toBe("TinyFishScraperAdapter");
+
+      resetAdapters();
+      process.env.SCRAPER_PROVIDER = "mock";
+      const mock = createScraperAdapter();
+      expect(mock.constructor.name).toBe("MockScraperAdapter");
+    });
+
+    it("parses guards with safe fallbacks on invalid/zero/negative env values", () => {
+      process.env.SOURCE_TIMEOUT_MS = "-500";
+      process.env.MAX_SCRAPE_PAGES_PER_RESEARCH = "invalid";
+
+      const guards = getGuards();
+      expect(guards.sourceTimeoutMs).toBe(30_000);
+      expect(guards.maxScrapePagesPerResearch).toBe(5);
     });
   });
 });
