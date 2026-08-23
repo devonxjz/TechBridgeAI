@@ -6,6 +6,7 @@
 [![CI Pipeline](https://github.com/devonxjz/TechBridgeAI/actions/workflows/ci.yml/badge.svg)](https://github.com/devonxjz/TechBridgeAI/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Next.js 16](https://img.shields.io/badge/Next.js-16%20(Turbopack)-black)](https://nextjs.org/)
+[![TypeScript 7.0.2](https://img.shields.io/badge/TypeScript-7.0.2-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Supabase](https://img.shields.io/badge/Storage-Supabase%20PostgreSQL-3ECF8E?logo=supabase)](https://supabase.com)
 
 ---
@@ -238,7 +239,7 @@ npm test
 
 Kiểm tra định kiểu TypeScript:
 ```bash
-npx tsc --noEmit
+npm run typecheck
 ```
 
 Build production:

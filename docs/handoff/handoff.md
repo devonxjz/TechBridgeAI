@@ -83,7 +83,7 @@ src/
   - Unit tests: Adapters, Analyst, Export, Diff, Sources, Supabase Storage, Types validation.
   - Integration tests: `ResearchModule`, `ProfileModule`.
   - E2E tests: Full research & streaming workflow.
-- **TypeScript**: `npx tsc --noEmit` compiles with **0 type errors**.
+- **TypeScript**: **TypeScript 7.0.2** (`@typescript/native`) as primary compiler (`npm run typecheck`) with **0 type errors**; TypeScript 6 (`@typescript/typescript6`) provides compatibility compiler API for ESLint.
 - **Production Build**: `npm run build` generates clean static & dynamic Next.js bundles.
 
 ---
