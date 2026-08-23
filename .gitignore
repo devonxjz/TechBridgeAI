@@ -43,3 +43,6 @@ next-env.d.ts
 
 # codegraph
 .codegraph/
+
+# isolated development worktrees
+.worktrees/
