@@ -15,23 +15,18 @@ export async function scrapeLinkedIn(
 ): Promise<RawFinding[]> {
   if (!input.linkedinUrl) return [];
 
-  try {
-    const page = await scraperAdapter.extract(input.linkedinUrl);
+  const page = await scraperAdapter.extract(input.linkedinUrl);
 
-    if (page.text.length < 50) return [];
+  if (page.text.length < 50) return [];
 
-    return [
-      {
-        source: "linkedin",
-        url: input.linkedinUrl,
-        content: page.text.slice(0, 5_000),
-        extractedAt: new Date(),
-        confidence: 0.7,
-        metadata: { title: page.title },
-      },
-    ];
-  } catch {
-    // LinkedIn scraping is unreliable, fail silently
-    return [];
-  }
+  return [
+    {
+      source: "linkedin",
+      url: input.linkedinUrl,
+      content: page.text.slice(0, 5_000),
+      extractedAt: new Date(),
+      confidence: 0.7,
+      metadata: { title: page.title },
+    },
+  ];
 }

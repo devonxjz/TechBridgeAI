@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════
 
 import { ScrapeError, type ScraperAdapter, type ScrapedContent } from "./types";
+import { resolvePublicTarget } from "./url-safety";
 
 interface TinyFishResponse {
   title?: string;
@@ -20,6 +21,15 @@ export class TinyFishScraperAdapter implements ScraperAdapter {
   ) {}
 
   async extract(url: string): Promise<ScrapedContent> {
+    const deadlineAt = Date.now() + this.timeoutMs;
+    // Enforce SSRF validation: never pass private/forbidden targets to remote proxy
+    await resolvePublicTarget(url, deadlineAt);
+
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) {
+      throw new ScrapeError("TinyFish request timed out", "tinyfish", "timeout");
+    }
+
     try {
       const response = await fetch(`${this.baseUrl}/v1/extract`, {
         method: "POST",
@@ -28,7 +38,7 @@ export class TinyFishScraperAdapter implements ScraperAdapter {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ url }),
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: AbortSignal.timeout(remainingMs),
       });
 
       if (response.status === 429) {

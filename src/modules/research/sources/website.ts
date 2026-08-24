@@ -25,6 +25,7 @@ export async function scrapeWebsite(
 
   const findings: RawFinding[] = [];
   let pagesScraped = 0;
+  let lastError: Error | null = null;
 
   // Scrape main page
   if (pagesScraped < maxPages) {
@@ -41,8 +42,11 @@ export async function scrapeWebsite(
           metadata: { title: mainPage.title, section: "main" },
         });
       }
-    } catch {
-      // Main page failed, continue with subpages
+    } catch (err: unknown) {
+      if (err instanceof Error && "code" in err && (err as { code?: string }).code === "invalid_target") {
+        throw err;
+      }
+      lastError = err instanceof Error ? err : new Error(String(err));
     }
   }
 
@@ -67,9 +71,16 @@ export async function scrapeWebsite(
           metadata: { title: page.title, section: path },
         });
       }
-    } catch {
-      // Subpage doesn't exist or blocked, skip
+    } catch (err: unknown) {
+      if (err instanceof Error && "code" in err && (err as { code?: string }).code === "invalid_target") {
+        throw err;
+      }
+      lastError = err instanceof Error ? err : new Error(String(err));
     }
+  }
+
+  if (findings.length === 0 && lastError) {
+    throw lastError;
   }
 
   return findings;

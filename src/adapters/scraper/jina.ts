@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════
 
 import { ScrapeError, type ScraperAdapter, type ScrapedContent } from "./types";
+import { resolvePublicTarget } from "./url-safety";
 
 export class JinaReaderScraperAdapter implements ScraperAdapter {
   constructor(
@@ -11,6 +12,15 @@ export class JinaReaderScraperAdapter implements ScraperAdapter {
   ) {}
 
   async extract(url: string): Promise<ScrapedContent> {
+    const deadlineAt = Date.now() + this.timeoutMs;
+    // Enforce SSRF validation: never pass private/forbidden targets to remote proxy
+    await resolvePublicTarget(url, deadlineAt);
+
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) {
+      throw new ScrapeError("Jina Reader request timed out", "jina", "timeout");
+    }
+
     try {
       const headers: Record<string, string> = {
         Accept: "text/plain",
@@ -24,7 +34,7 @@ export class JinaReaderScraperAdapter implements ScraperAdapter {
       const response = await fetch(jinaUrl, {
         method: "GET",
         headers,
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: AbortSignal.timeout(remainingMs),
       });
 
       if (response.status === 429) {

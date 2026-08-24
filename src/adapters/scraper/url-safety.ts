@@ -135,7 +135,14 @@ function expandIpv6(ip: string): number[] | null {
   return full.map((h) => parseInt(h || "0", 16));
 }
 
-export async function resolvePublicTarget(rawUrl: string): Promise<ResolvedTarget> {
+export async function resolvePublicTarget(
+  rawUrl: string,
+  deadlineAt?: number,
+): Promise<ResolvedTarget> {
+  if (deadlineAt !== undefined && Date.now() >= deadlineAt) {
+    throw new ScrapeError("DNS resolution timed out before lookup", "direct", "timeout");
+  }
+
   let parsedUrl: URL;
   try {
     parsedUrl = new URL(rawUrl);
@@ -180,11 +187,30 @@ export async function resolvePublicTarget(rawUrl: string): Promise<ResolvedTarge
     };
   }
 
-  // Domain lookup
+  // Domain lookup with deadline
   let addresses: Array<{ address: string; family: number }>;
   try {
-    addresses = await dns.lookup(hostname, { all: true, verbatim: true });
+    let lookupPromise = dns.lookup(hostname, { all: true, verbatim: true });
+    if (deadlineAt !== undefined) {
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0) {
+        throw new ScrapeError("DNS lookup timed out", "direct", "timeout");
+      }
+      lookupPromise = Promise.race([
+        lookupPromise,
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new ScrapeError("DNS lookup timed out", "direct", "timeout")),
+            remainingMs,
+          ),
+        ),
+      ]);
+    }
+    addresses = await lookupPromise;
   } catch (err: unknown) {
+    if (err instanceof ScrapeError) {
+      throw err;
+    }
     throw new ScrapeError(
       `DNS lookup failed for ${hostname}: ${err instanceof Error ? err.message : String(err)}`,
       "direct",

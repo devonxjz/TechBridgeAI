@@ -76,17 +76,20 @@ Chứng minh PartnerIQ giải quyết triệt để bài toán:
   > "Về mặt kỹ thuật, PartnerIQ được thiết kế theo nguyên lý **Deep Modules & Clean Seams**:
   > - **Reliable & Resilient**: Scraper 3 lớp an toàn, chống SSRF, có ngân sách trang (max 5 pages) và timeout chặt chẽ (30s).
   > - **Vendor-Agnostic**: Core hoàn toàn độc lập, dễ dàng hoán đổi OpenAI, Gemini, Serper, Jina hay TinyFish bằng cấu hình.
-  > - **100% Verified**: Đã có **87 automated tests** bao phủ Unit, Security, Integration và E2E.
+  > - **100% Verified**: Đã có **102 automated tests** bao phủ Unit, Security, Integration, TLS Handshake và E2E.
   >
   > PartnerIQ sẵn sàng triển khai thực tế để nâng cao năng suất tổ chức. Xin cảm ơn Ban Giám khảo!"
 
 ---
 
-## 🧪 Demo Company Matrix (Benchmark & Smoke Test)
+## 🧪 Demo Company Matrix (Benchmark & Smoke Test Measured Results)
 
-| Company | Input/URL / MST | Provider thắng | Duration (Scrape) | Outcome | Evidence hợp lệ |
+> **Cấu hình đo thực tế**: `SCRAPER_PROVIDER=tiered`, `SCRAPER_DIRECT_ENABLED=true`, `VIETQR_ENABLED=true`.
+> *Ghi chú về credentials*: `JINA_API_KEY` và `TINYFISH_API_KEY` bị skip khi chưa cấu hình key trên môi trường local, tier `direct` thắng ở Tier 1 trên cả 3 company cases.
+
+| Company | Input/URL / MST | Provider thắng | Duration (Scrape / VietQR) | Outcome | Evidence hợp lệ thu thập |
 |---|---|---|---:|---|---|
-| **FPT Corporation** | `https://fpt.com.vn`<br>MST: `0101248141` | `direct` (hoặc `jina`/`tinyfish` tùy anti-bot) | ~450ms | `success` | Website title, overview, VietQR ĐKKD record |
-| **Tập đoàn Vingroup** | `https://vingroup.net`<br>MST: `0101245486` | `direct` (hoặc `jina`/`tinyfish`) | ~620ms | `success` | Giới thiệu tập đoàn đa ngành, VietQR record |
-| **Công ty CP MISA** | `https://misa.vn`<br>MST: `0101243150` | `direct` (hoặc `jina`/`tinyfish`) | ~510ms | `success` | Giải pháp phần mềm kế toán B2B, VietQR record |
-| **Blocked URL Case** | `http://127.0.0.1`<br>`http://169.254.169.254` | `direct` | <5ms | `invalid_target` (Blocked) | Không tạo evidence giả; stream emit error |
+| **FPT Corporation** | `https://fpt.com.vn`<br>MST: `0101248141` | `direct` | 845ms / 227ms | `success` | Title: *"FPT Corporation \| Trang chủ"*, VietQR: *"CÔNG TY CỔ PHẦN FPT"* |
+| **Tập đoàn Vingroup** | `https://vingroup.net`<br>MST: `0101245486` | `direct` | 132ms / 92ms | `success` | Title: *"Trang chủ - Tập đoàn Vingroup"*, VietQR: *"TẬP ĐOÀN VINGROUP - CÔNG TY CP"* |
+| **Công ty CP MISA** | `https://misa.vn`<br>MST: `0101243150` | `direct` | 395ms / 292ms | `success` | Title: *"Tập đoàn MISA: Tiên phong xây dựng Agentic AI..."*, VietQR: *"CÔNG TY CỔ PHẦN MISA"* |
+| **Blocked URL Case** | `http://127.0.0.1`<br>`http://169.254.169.254` | `direct` | <1ms | `invalid_target` (Blocked) | Bị chặn ngay tại bước DNS/IP safety resolution; không tạo evidence giả |

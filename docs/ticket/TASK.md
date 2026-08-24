@@ -68,8 +68,8 @@
 - [x] S5.4: Unit tests in `tests/unit/registry-adapter.test.ts` and `tests/unit/sources.test.ts`
 
 ### Sprint 6: Full Verification, Smoke Test & Documentation ✅ COMPLETE
-- [x] S6.1: Clean verification: typecheck, lint, build, and 14 test suites (87 tests passed)
-- [x] S6.2: Security smoke validation (blocked IP/loopback, redirects, content limits)
-- [x] S6.3: Demo company matrix and documentation in `README.md` and `docs/plan/DEMO_SCRIPT.md`
+- [x] S6.1: Clean verification: typecheck, typecheck:legacy, lint, build, and 14 test suites (102 tests passed)
+- [x] S6.2: Security smoke validation (blocked IP/loopback, redirects, content limits, TLS/SNI verification)
+- [x] S6.3: Demo company matrix measured smoke benchmarks in `README.md` and `docs/plan/DEMO_SCRIPT.md`
 
-**Final Status**: All Sprints Completed & Verified (87/87 Tests Passed + Build Clean + Lint Clean) 🚀
+**Final Status**: All Sprints Completed & Verified (102/102 Tests Passed + Build Clean + Lint Clean + Types Clean) 🚀

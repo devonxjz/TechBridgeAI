@@ -72,7 +72,7 @@ export class VietQrRegistryAdapter implements RegistryAdapter {
         throw new RegistryError("Failed to parse VietQR response JSON", "invalid_response");
       }
 
-      if (data.code !== "00" || !data.data || !data.data.name) {
+      if (data.code !== "00" || !data.data || !data.data.name || !data.data.id) {
         if (data.code === "51" || (data.desc && data.desc.toLowerCase().includes("not found"))) {
           throw new RegistryError(
             `Business with taxId ${cleanTaxId} not found: ${data.desc || data.code}`,
@@ -86,7 +86,7 @@ export class VietQrRegistryAdapter implements RegistryAdapter {
       }
 
       const record: RegistryRecord = {
-        taxId: data.data.id || cleanTaxId,
+        taxId: data.data.id,
         name: data.data.name,
         internationalName: data.data.internationalName || undefined,
         shortName: data.data.shortName || undefined,

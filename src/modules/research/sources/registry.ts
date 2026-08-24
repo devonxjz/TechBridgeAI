@@ -16,10 +16,10 @@ export async function fetchRegistryData(
   input: CompanyInput,
   searchAdapter: SearchAdapter,
   scraperAdapter: ScraperAdapter,
-  registryAdapter?: RegistryAdapter,
+  registryAdapter: RegistryAdapter,
 ): Promise<RawFinding[]> {
   // 1. Try VietQR if taxId is provided
-  if (input.taxId && registryAdapter) {
+  if (input.taxId) {
     try {
       const record = await registryAdapter.findByTaxId(input.taxId);
       if (record) {
