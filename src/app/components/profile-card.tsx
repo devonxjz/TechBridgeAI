@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { CompanyProfile, ProfileDiff, AnalysisReport } from "@/lib/types";
 import { exportProfileToMarkdown, exportProfileToJSON } from "@/lib/export";
+import { ExportPdfButton } from "./export-pdf-button";
 
 interface ProfileCardProps {
   profile: CompanyProfile;
@@ -81,7 +82,8 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
           </div>
 
           {/* Export Action Buttons */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <ExportPdfButton profile={profile} report={report} />
             <button
               onClick={handleCopyMarkdown}
               className="px-3 py-1.5 text-xs font-medium bg-surface hover:bg-card-border
