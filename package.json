@@ -13,6 +13,7 @@
     "postinstall": "node -e \"const fs=require('fs'),p='node_modules/typescript/package.json';if(fs.existsSync(p)){const j=JSON.parse(fs.readFileSync(p,'utf8'));if(!j.bin||!j.bin.tsc){j.bin=j.bin||{};j.bin.tsc='./bin/tsc';fs.writeFileSync(p,JSON.stringify(j,null,2));const b='node_modules/typescript/bin/tsc';if(!fs.existsSync(b)){fs.writeFileSync(b,'#!/usr/bin/env node\\nrequire(\\'../../@typescript/native/bin/tsc\\');\\n',{mode:0o755});}}}\""
   },
   "dependencies": {
+    "@react-pdf/renderer": "^4.8.0",
     "@supabase/supabase-js": "^2.112.3",
     "next": "16.3.2",
     "openai": "^7.5.0",
