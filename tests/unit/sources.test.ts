@@ -71,7 +71,7 @@ describe("Research Sources Unit Tests", () => {
       expect(scraper.callLog.length).toBeLessThanOrEqual(5);
     });
 
-    it("strictly stops before maxPages + 1 even if all fail", async () => {
+    it("strictly stops before maxPages + 1 and throws last error when all fail", async () => {
       const input: CompanyInput = {
         name: "FPT",
         website: "https://fpt.com.vn",
@@ -79,12 +79,54 @@ describe("Research Sources Unit Tests", () => {
 
       scraper.extract = async (url: string) => {
         scraper.callLog.push(url);
-        throw new Error("Page error");
+        throw new Error("Page error 500");
+      };
+
+      await expect(scrapeWebsite(input, scraper, search, 3)).rejects.toThrow("Page error 500");
+      expect(scraper.callLog.length).toBe(3);
+    });
+
+    it("rethrows invalid_target immediately without attempting subpages", async () => {
+      const input: CompanyInput = {
+        name: "FPT",
+        website: "http://127.0.0.1",
+      };
+
+      scraper.extract = async (url: string) => {
+        scraper.callLog.push(url);
+        const err = new Error("Blocked private IP");
+        (err as { code?: string }).code = "invalid_target";
+        throw err;
+      };
+
+      await expect(scrapeWebsite(input, scraper, search, 5)).rejects.toThrow();
+      expect(scraper.callLog.length).toBe(1);
+    });
+
+    it("returns findings when main page fails but a subpage succeeds within budget", async () => {
+      const input: CompanyInput = {
+        name: "FPT",
+        website: "https://fpt.com.vn",
+      };
+
+      scraper.extract = async (url: string) => {
+        scraper.callLog.push(url);
+        if (url === "https://fpt.com.vn") {
+          throw new Error("503 Gateway Timeout");
+        }
+        if (url.endsWith("/about")) {
+          return {
+            url,
+            title: "About FPT",
+            text: "FPT Corporation is a leading IT services provider in Vietnam with over 30000 employees.",
+          };
+        }
+        throw new Error("404 Not Found");
       };
 
       const findings = await scrapeWebsite(input, scraper, search, 3);
-      expect(findings).toEqual([]);
-      expect(scraper.callLog.length).toBe(3);
+      expect(findings.length).toBe(1);
+      expect(findings[0].content).toContain("leading IT services provider");
     });
 
     it("discovers website via search when website is not provided", async () => {
@@ -227,6 +269,19 @@ describe("Research Sources Unit Tests", () => {
       const input: CompanyInput = { name: "FPT" };
       const findings = await scrapeLinkedIn(input, scraper);
       expect(findings).toEqual([]);
+    });
+
+    it("rethrows error when linkedinUrl extraction fails", async () => {
+      scraper.extract = async () => {
+        throw new Error("LinkedIn network error 403");
+      };
+
+      const input: CompanyInput = {
+        name: "FPT",
+        linkedinUrl: "https://linkedin.com/company/fpt",
+      };
+
+      await expect(scrapeLinkedIn(input, scraper)).rejects.toThrow("LinkedIn network error 403");
     });
   });
 

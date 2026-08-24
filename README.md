@@ -29,7 +29,9 @@
   * 📈 *Recent Activity (20%)*
 * **"What Changed?" Diff Engine:** So sánh tự động giữa các lần cập nhật hồ sơ, phát hiện biến động về nhân sự, ngành nghề, sản phẩm.
 * **Supabase PostgreSQL Multi-Versioning:** Lưu trữ JSONB đa phiên bản với tốc độ cao và chi phí tối ưu (Free tier).
-* **Báo cáo chuyên nghiệp:** Hỗ trợ Copy Markdown, Tải file `.md` và xuất dữ liệu dạng JSON.
+* **Báo cáo & Xuất bản chuyên nghiệp:**
+  * 📋 **Copy Markdown & Tải .md / .json**: Tải báo cáo chi tiết dạng markdown hoặc dữ liệu thô.
+  * 📑 **Xuất PDF One-Pager (A4 Portrait)**: Tạo tài liệu tóm tắt 1 trang tiếng Việt chuyên nghiệp chuẩn doanh nghiệp với Fit Score, 5 thanh tiêu chí trực quan, Nhận định, Rủi ro, Hành động và Nguồn trích dẫn. Được tạo hoàn toàn phía client bằng `@react-pdf/renderer` qua dynamic import, hoạt động offline với font Noto Sans tiếng Việt.
 
 ---
 
@@ -151,7 +153,7 @@ MAX_TOKENS_PER_DAY=500000
 
 ## 🧪 Kiểm Thử & Xác Thực (Testing & Verification)
 
-Chạy bộ kiểm thử tự động với Vitest (14 test suites, 87 unit, integration & E2E tests):
+Chạy bộ kiểm thử tự động với Vitest (16 test suites, bao gồm PDF One-Pager tests, Transport TLS, Unit, Integration & E2E):
 ```bash
 npm test
 ```

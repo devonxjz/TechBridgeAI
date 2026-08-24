@@ -120,6 +120,30 @@ describe("VietQrRegistryAdapter", () => {
     }
   });
 
+  it("throws RegistryError invalid_response when VietQR response is missing data.id", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          code: "00",
+          desc: "ok",
+          data: {
+            name: "CÔNG TY THIẾU ID",
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const adapter = new VietQrRegistryAdapter();
+    try {
+      await adapter.findByTaxId("0101234567");
+      expect.unreachable("Should throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(RegistryError);
+      expect((err as RegistryError).code).toBe("invalid_response");
+    }
+  });
+
   it("throws RegistryError timeout on abort", async () => {
     const abortErr = new Error("Timeout");
     abortErr.name = "TimeoutError";

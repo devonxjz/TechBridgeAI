@@ -352,4 +352,69 @@ describe("TieredScraperAdapter", () => {
     expect(jinaLog.duration).toBeGreaterThanOrEqual(0);
     expect(JSON.stringify(jinaLog)).not.toContain("secret_token");
   });
+
+  it("rejects private/loopback targets in TinyFishScraperAdapter without outbound fetch", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const adapter = new TinyFishScraperAdapter("test-key");
+
+    for (const privateUrl of [
+      "http://127.0.0.1",
+      "http://localhost",
+      "http://10.0.0.1",
+      "http://192.168.1.1",
+      "http://169.254.169.254",
+      "http://[::1]",
+    ]) {
+      try {
+        await adapter.extract(privateUrl);
+        expect.unreachable(`Should have rejected ${privateUrl}`);
+      } catch (err) {
+        expect(err).toBeInstanceOf(ScrapeError);
+        expect((err as ScrapeError).code).toBe("invalid_target");
+      }
+    }
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects private/loopback targets in JinaReaderScraperAdapter without outbound fetch", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const adapter = new JinaReaderScraperAdapter("test-key");
+
+    for (const privateUrl of [
+      "http://127.0.0.1",
+      "http://localhost",
+      "http://10.0.0.1",
+      "http://192.168.1.1",
+      "http://169.254.169.254",
+    ]) {
+      try {
+        await adapter.extract(privateUrl);
+        expect.unreachable(`Should have rejected ${privateUrl}`);
+      } catch (err) {
+        expect(err).toBeInstanceOf(ScrapeError);
+        expect((err as ScrapeError).code).toBe("invalid_target");
+      }
+    }
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects private target in remote-only TieredScraperAdapter without calling remote endpoints", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const jina = new JinaReaderScraperAdapter("jina-key");
+    const tinyfish = new TinyFishScraperAdapter("tf-key");
+
+    const tiered = new TieredScraperAdapter([jina, tinyfish]);
+
+    try {
+      await tiered.extract("http://127.0.0.1");
+      expect.unreachable("Should have rejected private target");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ScrapeError);
+      expect((err as ScrapeError).code).toBe("invalid_target");
+    }
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });

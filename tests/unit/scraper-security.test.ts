@@ -135,6 +135,21 @@ describe("resolvePublicTarget", () => {
     vi.spyOn(dns, "lookup").mockResolvedValueOnce([] as never);
     await expect(resolvePublicTarget("https://empty-dns.example.com")).rejects.toThrow(ScrapeError);
   });
+
+  it("enforces deadline timeout during DNS lookup when DNS resolution hangs", async () => {
+    vi.spyOn(dns, "lookup").mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve([{ address: "8.8.8.8", family: 4 }]), 5000)) as never
+    );
+
+    const deadlineAt = Date.now() + 50; // 50ms deadline
+    try {
+      await resolvePublicTarget("https://slow-dns.example.com", deadlineAt);
+      expect.unreachable("Should have timed out");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ScrapeError);
+      expect((err as ScrapeError).code).toBe("timeout");
+    }
+  });
 });
 
 describe("SafeDirectScraperAdapter HTML and response bounds", () => {
@@ -148,7 +163,7 @@ describe("SafeDirectScraperAdapter HTML and response bounds", () => {
     // 256 KiB repeated unclosed tags
     const unclosedHtml = "<html><body>" + "<script>var x = 1; ".repeat(16384) + "Hello World</body></html>";
     const startTime = Date.now();
-    
+
     const clean = adapter.cleanHtml(unclosedHtml);
     const duration = Date.now() - startTime;
 

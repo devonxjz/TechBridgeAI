@@ -105,4 +105,50 @@ describe("ResearchModule Integration Tests", () => {
     const errorEvents = events.filter((e) => e.type === "error");
     expect(errorEvents.length).toBeGreaterThan(0);
   });
+
+  it("emits exact event sequence started -> error -> failed -> complete when website source fails", async () => {
+    // Force scraper to throw an error for website scraping
+    scraper.extract = async () => {
+      throw new Error("Target connection refused 502");
+    };
+
+    const researchModule = createResearchModule({ llm, search, scraper, registry, guards });
+
+    const input: CompanyInput = {
+      name: "FPT",
+      website: "https://fpt.com.vn",
+    };
+
+    const events: ResearchEvent[] = [];
+    for await (const event of researchModule.research(input)) {
+      events.push(event);
+    }
+
+    // Filter events for website source
+    const websiteEvents = events.filter(
+      (e) => ("source" in e && e.source === "website") || e.type === "complete"
+    );
+
+    // Verify exact sequence for website
+    expect(websiteEvents[0]).toEqual({
+      type: "progress",
+      source: "website",
+      status: "started",
+    });
+
+    expect(websiteEvents[1]).toEqual({
+      type: "error",
+      source: "website",
+      error: expect.stringContaining("Target connection refused 502"),
+    });
+
+    expect(websiteEvents[2]).toEqual({
+      type: "progress",
+      source: "website",
+      status: "failed",
+    });
+
+    const complete = events.find((e) => e.type === "complete");
+    expect(complete).toBeDefined();
+  });
 });
