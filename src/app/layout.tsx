@@ -11,6 +11,14 @@ export const metadata: Metadata = {
   title: "PartnerIQ — Company Intelligence Agent",
   description:
     "AI-powered company research and profiling. Automatically discover, analyze, and track Vietnamese businesses.",
+  icons: {
+    icon: [
+      { url: "/logo-icon.png", type: "image/png" },
+      { url: "/favicon.ico" },
+    ],
+    shortcut: "/logo-icon.png",
+    apple: "/logo-icon.png",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
