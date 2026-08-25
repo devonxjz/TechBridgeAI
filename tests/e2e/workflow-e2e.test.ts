@@ -184,4 +184,44 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
     expect(errorMessages.at(-1)).toContain("Serper search failed: 403 Unauthorized");
     expect(errorMessages.at(-1)).toContain("TinyFish request timed out");
   });
+
+  it("cancels workflow and prevents profile save on request abort", async () => {
+    const storage = createStorageAdapter() as MemoryStorageAdapter;
+    storage.clear();
+
+    const controller = new AbortController();
+
+    search.search = async () => {
+      await new Promise((r) => setTimeout(r, 200));
+      return [{ title: "FPT", url: "https://fpt.com.vn", snippet: "FPT Info" }];
+    };
+
+    scraper.extract = async () => {
+      await new Promise((r) => setTimeout(r, 200));
+      return { url: "https://fpt.com.vn", title: "FPT", text: "FPT Content" };
+    };
+
+    const req = new NextRequest("http://localhost:3000/api/research", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "FPT", website: "https://fpt.com.vn" }),
+      signal: controller.signal,
+    });
+
+    const response = await POST(req);
+    expect(response.status).toBe(200);
+
+    // Abort after small delay while sources are in flight
+    setTimeout(() => {
+      controller.abort();
+    }, 50);
+
+    const text = await response.text();
+    expect(text).toContain("event: research:start");
+
+    // Profile should not have been saved
+    const saved = await storage.getLatestProfile("fpt");
+    expect(saved).toBeNull();
+  });
 });
+

@@ -346,14 +346,21 @@ function buildGraph(
     .addNode("prepare_evidence", async (state) => {
       const prepared = prepareEvidence(state.sourceResults);
       if (prepared.findings.length === 0) {
+        const errorDetails = state.sourceResults
+          .filter((r) => r.error)
+          .map((r) => `${r.source}: ${r.error?.message}`);
+        const detailStr =
+          errorDetails.length > 0 ? ` Chi tiết: ${errorDetails.join(" | ")}` : "";
+        const message = `Không tìm thấy thông tin nào về công ty này.${detailStr}`;
+
         await dispatchCustomEvent("sse_event", {
           event: "error",
-          data: { message: "Không tìm thấy thông tin nào về công ty này." },
+          data: { message },
         } as StreamEvent);
         return {
           findings: [],
           outcome: "failed" as const,
-          fatalError: "Không tìm thấy thông tin nào về công ty này.",
+          fatalError: message,
         };
       }
 
