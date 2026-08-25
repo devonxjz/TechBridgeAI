@@ -16,9 +16,11 @@ export default function HomePage() {
       <header className="border-b border-card-border bg-card/50 backdrop-blur-md sticky top-0 z-50">
         <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-gradient-to-br from-accent to-purple-500 rounded-xl flex items-center justify-center text-white font-bold text-sm">
-              P
-            </div>
+            <img
+              src="/logo-icon.jpg"
+              alt="PartnerIQ Logo"
+              className="w-9 h-9 rounded-xl object-cover shadow-md shadow-accent/20 border border-card-border"
+            />
             <div>
               <h1 className="text-lg font-bold tracking-tight">PartnerIQ</h1>
               <p className="text-xs text-muted -mt-0.5">
