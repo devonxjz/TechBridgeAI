@@ -1,11 +1,27 @@
 // ═══════════════════════════════════════════════════════
 // TinyFish Scraper Adapter
+// Official TinyFish Fetch API (https://api.fetch.tinyfish.ai)
 // ═══════════════════════════════════════════════════════
 
 import { ScrapeError, type ScraperAdapter, type ScrapedContent } from "./types";
 import { resolvePublicTarget } from "./url-safety";
 
+interface TinyFishResultItem {
+  url?: string;
+  final_url?: string;
+  title?: string;
+  description?: string | null;
+  text?: string;
+  content?: string;
+  markdown?: string;
+  html?: string;
+  language?: string;
+  metadata?: Record<string, unknown>;
+}
+
 interface TinyFishResponse {
+  results?: TinyFishResultItem[];
+  errors?: Array<{ url?: string; error?: string }>;
   title?: string;
   content?: string;
   text?: string;
@@ -16,7 +32,7 @@ interface TinyFishResponse {
 export class TinyFishScraperAdapter implements ScraperAdapter {
   constructor(
     private readonly apiKey: string,
-    private readonly baseUrl = "https://api.tinyfish.app",
+    private readonly baseUrl = "https://api.fetch.tinyfish.ai",
     private readonly timeoutMs = 8_000,
   ) {}
 
@@ -31,13 +47,22 @@ export class TinyFishScraperAdapter implements ScraperAdapter {
     }
 
     try {
-      const response = await fetch(`${this.baseUrl}/v1/extract`, {
+      const endpoint = this.baseUrl.endsWith("/")
+        ? this.baseUrl.slice(0, -1)
+        : this.baseUrl;
+
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
+          "X-API-Key": this.apiKey,
           Authorization: `Bearer ${this.apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({
+          urls: [url],
+          url,
+          format: "markdown",
+        }),
         signal: AbortSignal.timeout(remainingMs),
       });
 
@@ -54,21 +79,44 @@ export class TinyFishScraperAdapter implements ScraperAdapter {
       }
 
       const data = (await response.json()) as TinyFishResponse;
-      const text = data.content ?? data.text ?? "";
+
+      // Handle official results array or flat response
+      const firstResult = data.results && data.results.length > 0 ? data.results[0] : null;
+
+      if (!firstResult && data.errors && data.errors.length > 0) {
+        const errType = data.errors[0]?.error || "upstream_error";
+        const code = errType === "invalid_url" ? "invalid_target" : "upstream_error";
+        throw new ScrapeError(`TinyFish error: ${errType}`, "tinyfish", code);
+      }
+
+      const text =
+        firstResult?.text ??
+        firstResult?.content ??
+        firstResult?.markdown ??
+        data.content ??
+        data.text ??
+        "";
 
       if (text.length <= 50) {
         throw new ScrapeError("TinyFish returned empty content", "tinyfish", "empty");
       }
 
+      const title = firstResult?.title ?? data.title ?? "";
+      const html = firstResult?.html ?? data.html;
+      const metadata = {
+        ...(data.metadata ?? {}),
+        ...(firstResult?.metadata ?? {}),
+        ...(firstResult?.description ? { description: firstResult.description } : {}),
+        ...(firstResult?.final_url ? { final_url: firstResult.final_url } : {}),
+        provider: "tinyfish" as const,
+      };
+
       return {
-        url,
-        title: data.title ?? "",
+        url: firstResult?.url ?? url,
+        title,
         text,
-        html: data.html,
-        metadata: {
-          ...data.metadata,
-          provider: "tinyfish",
-        },
+        html,
+        metadata,
       };
     } catch (err: unknown) {
       if (err instanceof ScrapeError) {
