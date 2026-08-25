@@ -5,6 +5,8 @@
 
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
-    await import("@/observability/langfuse");
+    const { initOpenTelemetry } = await import("./observability/langfuse");
+    initOpenTelemetry();
   }
 }
+
