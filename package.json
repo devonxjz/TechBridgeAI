@@ -13,6 +13,13 @@
     "postinstall": "node -e \"const fs=require('fs'),p='node_modules/typescript/package.json';if(fs.existsSync(p)){const j=JSON.parse(fs.readFileSync(p,'utf8'));if(!j.bin||!j.bin.tsc){j.bin=j.bin||{};j.bin.tsc='./bin/tsc';fs.writeFileSync(p,JSON.stringify(j,null,2));const b='node_modules/typescript/bin/tsc';if(!fs.existsSync(b)){fs.writeFileSync(b,'#!/usr/bin/env node\\nrequire(\\'../../@typescript/native/bin/tsc\\');\\n',{mode:0o755});}}}\""
   },
   "dependencies": {
+    "@langchain/core": "1.2.9",
+    "@langchain/langgraph": "1.4.12",
+    "@langchain/openai": "1.5.10",
+    "@langfuse/langchain": "5.10.1",
+    "@langfuse/otel": "5.10.1",
+    "@langfuse/tracing": "5.10.1",
+    "@opentelemetry/sdk-node": "0.221.0",
     "@react-pdf/renderer": "^4.8.0",
     "@supabase/supabase-js": "^2.112.3",
     "next": "16.3.2",
