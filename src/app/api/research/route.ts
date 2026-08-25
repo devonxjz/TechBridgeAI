@@ -18,6 +18,11 @@ import {
 import { createProfileModule } from "@/modules/profile";
 import { createAnalystModule } from "@/modules/analyst";
 import { createResearchWorkflow } from "@/modules/workflow";
+import {
+  createLangfuseCallback,
+  flushLangfuse,
+} from "@/observability/langfuse";
+import { slugify, type SourceName } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -50,6 +55,19 @@ export async function POST(req: NextRequest) {
 
     const { stream, writer } = createSSEStream();
     const researchRunId = crypto.randomUUID();
+    const companyId = slugify(input.name);
+
+    const langfuseCallback = createLangfuseCallback({
+      researchRunId,
+      companyId,
+      requestedSources: [
+        "web_search",
+        "website",
+        "news",
+        "registry",
+        ...(input.linkedinUrl ? ["linkedin" as SourceName] : []),
+      ],
+    });
 
     // Setup cancellation & 285s internal deadline
     const controller = new AbortController();
@@ -64,6 +82,7 @@ export async function POST(req: NextRequest) {
         for await (const event of workflow.stream(input, {
           researchRunId,
           signal: controller.signal,
+          callbacks: langfuseCallback ? [langfuseCallback] : undefined,
         })) {
           writer.write(event);
         }
@@ -77,6 +96,7 @@ export async function POST(req: NextRequest) {
       } finally {
         clearTimeout(deadlineTimeout);
         req.signal.removeEventListener("abort", onReqAbort);
+        await flushLangfuse();
         writer.close();
       }
     })();
