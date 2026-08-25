@@ -17,9 +17,9 @@ export default function HomePage() {
         <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img
-              src="/logo-icon.jpg"
+              src="/logo-icon.png"
               alt="PartnerIQ Logo"
-              className="w-9 h-9 rounded-xl object-cover shadow-md shadow-accent/20 border border-card-border"
+              className="w-9 h-9 object-contain drop-shadow-[0_0_12px_rgba(59,130,246,0.5)]"
             />
             <div>
               <h1 className="text-lg font-bold tracking-tight">PartnerIQ</h1>
