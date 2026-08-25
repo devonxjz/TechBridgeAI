@@ -76,7 +76,7 @@ function FitScoreBars({ criteria }: { criteria: PdfCriterion[] }) {
 
 const styles = StyleSheet.create({
   page: {
-    padding: 28,
+    padding: 30,
     fontFamily: "NotoSans",
     fontSize: 8.5,
     color: "#1E293B",
@@ -90,7 +90,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#E2E8F0",
     paddingBottom: 6,
-    marginBottom: 10,
+    marginBottom: 12,
   },
   topBrand: {
     fontSize: 7.5,
@@ -107,17 +107,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 12,
+    marginBottom: 14,
   },
   heroLeft: {
     flex: 1,
     paddingRight: 16,
   },
   companyName: {
-    fontSize: 19,
+    fontSize: 18,
     fontWeight: 600,
     color: "#0F172A",
-    lineHeight: 1.15,
+    lineHeight: 1.2,
     marginBottom: 4,
   },
   metaSubline: {
@@ -159,14 +159,14 @@ const styles = StyleSheet.create({
     color: "#334155",
     textTransform: "uppercase",
     letterSpacing: 0.5,
-    marginBottom: 5,
+    marginBottom: 6,
     borderBottomWidth: 1,
     borderBottomColor: "#F1F5F9",
     paddingBottom: 3,
   },
   twoColSection: {
     flexDirection: "row",
-    marginBottom: 12,
+    marginBottom: 14,
   },
   overviewCol: {
     flex: 1,
@@ -220,17 +220,17 @@ const styles = StyleSheet.create({
     borderLeftWidth: 3,
     borderLeftColor: "#2563EB",
     borderRadius: 4,
-    padding: "6 8",
-    marginBottom: 12,
+    padding: "8 10",
+    marginBottom: 14,
   },
   summaryText: {
     fontSize: 8,
     color: "#1E293B",
-    lineHeight: 1.35,
+    lineHeight: 1.4,
   },
   risksActionsRow: {
     flexDirection: "row",
-    marginBottom: 12,
+    marginBottom: 14,
   },
   riskCol: {
     flex: 1,
@@ -242,7 +242,7 @@ const styles = StyleSheet.create({
     color: "#DC2626",
     textTransform: "uppercase",
     letterSpacing: 0.5,
-    marginBottom: 5,
+    marginBottom: 6,
     borderBottomWidth: 1,
     borderBottomColor: "#FEE2E2",
     paddingBottom: 3,
@@ -257,7 +257,7 @@ const styles = StyleSheet.create({
     color: "#2563EB",
     textTransform: "uppercase",
     letterSpacing: 0.5,
-    marginBottom: 5,
+    marginBottom: 6,
     borderBottomWidth: 1,
     borderBottomColor: "#DBEAFE",
     paddingBottom: 3,
@@ -287,7 +287,7 @@ const styles = StyleSheet.create({
     marginTop: "auto",
     borderTopWidth: 1,
     borderTopColor: "#E2E8F0",
-    paddingTop: 6,
+    paddingTop: 8,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -331,15 +331,15 @@ export function CompanyOnePager({ payload }: CompanyOnePagerProps): React.ReactE
 
   return (
     <Document title={payload.companyName} author="PartnerIQ" subject="Hồ sơ doanh nghiệp">
-      <Page size="A4" orientation="portrait" wrap={false} style={styles.page}>
+      <Page size="A4" orientation="portrait" style={styles.page}>
         {/* Top Header */}
-        <View style={styles.topHeader}>
+        <View style={styles.topHeader} wrap={false}>
           <Text style={styles.topBrand}>PartnerIQ · Hồ sơ doanh nghiệp</Text>
           <Text style={styles.topDate}>{payload.generatedAt}</Text>
         </View>
 
         {/* Hero Section */}
-        <View style={styles.heroRow}>
+        <View style={styles.heroRow} wrap={false}>
           <View style={styles.heroLeft}>
             <Text style={styles.companyName}>{payload.companyName}</Text>
             {metaParts.length > 0 && (
@@ -358,7 +358,7 @@ export function CompanyOnePager({ payload }: CompanyOnePagerProps): React.ReactE
         </View>
 
         {/* Section 1: Overview + Fit Score Breakdown */}
-        <View style={styles.twoColSection}>
+        <View style={styles.twoColSection} wrap={false}>
           <View style={styles.overviewCol}>
             <Text style={styles.sectionTitle}>Tổng quan</Text>
             <Text style={styles.overviewText}>
@@ -372,7 +372,7 @@ export function CompanyOnePager({ payload }: CompanyOnePagerProps): React.ReactE
         </View>
 
         {/* Section 2: Executive Summary (Nhận định) */}
-        <View style={styles.summaryBox}>
+        <View style={styles.summaryBox} wrap={false}>
           <Text style={[styles.sectionTitle, { borderBottomWidth: 0, marginBottom: 3 }]}>
             Nhận định
           </Text>
@@ -380,7 +380,7 @@ export function CompanyOnePager({ payload }: CompanyOnePagerProps): React.ReactE
         </View>
 
         {/* Section 3: Risks & Actions */}
-        <View style={styles.risksActionsRow}>
+        <View style={styles.risksActionsRow} wrap={false}>
           <View style={styles.riskCol}>
             <Text style={styles.riskTitle}>Rủi ro tiềm ẩn</Text>
             {payload.risks && payload.risks.length > 0 ? (
@@ -410,7 +410,7 @@ export function CompanyOnePager({ payload }: CompanyOnePagerProps): React.ReactE
         </View>
 
         {/* Footer */}
-        <View style={styles.footer}>
+        <View style={styles.footer} wrap={false}>
           <View style={styles.footerSources}>
             <Text style={styles.footerLabel}>Nguồn: </Text>
             {payload.sources && payload.sources.length > 0 ? (
