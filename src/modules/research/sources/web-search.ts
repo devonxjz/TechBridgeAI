@@ -14,25 +14,30 @@ export async function searchWeb(
   const queries = customQueries ?? buildResearchQueries(input).web;
   const findings: RawFinding[] = [];
 
-  for (const query of queries) {
-    const results = await searchAdapter.search(query, {
-      maxResults: 5,
-      language: "vi",
-      region: "vn",
-    });
+  const resultsByQuery = await Promise.all(
+    queries.map(async (query) => {
+      const results = await searchAdapter.search(query, {
+        maxResults: 5,
+        language: "vi",
+        region: "vn",
+      });
 
-    for (const result of results) {
-      findings.push({
-        source: "web_search",
+      return results.map((result) => ({
+        source: "web_search" as const,
         url: result.url,
         content: `[${result.title}]\n${result.snippet}`,
         extractedAt: new Date(),
         confidence: 0.6,
         metadata: { query, title: result.title },
-      });
-    }
+      }));
+    })
+  );
+
+  for (const group of resultsByQuery) {
+    findings.push(...group);
   }
 
   return findings;
 }
+
 

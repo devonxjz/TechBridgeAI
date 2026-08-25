@@ -26,6 +26,10 @@ export interface ResearchModule {
   research(input: CompanyInput): AsyncGenerator<ResearchEvent, void, unknown>;
 }
 
+export type ResearchSourceRunner = (
+  input: CompanyInput
+) => Promise<RawFinding[]>;
+
 export interface ResearchDeps {
   llm: LLMAdapter;
   search: SearchAdapter;
@@ -33,6 +37,31 @@ export interface ResearchDeps {
   registry: RegistryAdapter;
   guards: ResourceGuards;
 }
+
+export function createResearchSourceRunners(
+  deps: ResearchDeps
+): Record<SourceName, ResearchSourceRunner> {
+  return {
+    web_search: (input) => searchWeb(input, deps.search),
+    website: (input) =>
+      scrapeWebsite(
+        input,
+        deps.scraper,
+        deps.search,
+        deps.guards.maxScrapePagesPerResearch
+      ),
+    news: (input) => searchNews(input, deps.search),
+    registry: (input) =>
+      fetchRegistryData(
+        input,
+        deps.search,
+        deps.scraper,
+        deps.registry
+      ),
+    linkedin: (input) => scrapeLinkedIn(input, deps.scraper),
+  };
+}
+
 
 export function createResearchModule(deps: ResearchDeps): ResearchModule {
   return {
