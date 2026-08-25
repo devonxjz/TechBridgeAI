@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createAnalystModule } from "@/modules/analyst";
-import { MockLLMAdapter } from "@/adapters/llm/mock";
+import { MockLLMAdapter } from "../helpers/mock-adapters";
 import type { CompanyProfile } from "@/lib/types";
 
 describe("AnalystModule Unit Tests", () => {

@@ -10,15 +10,12 @@ import type { StorageAdapter } from "@/adapters/storage/types";
 import type { RegistryAdapter } from "@/adapters/registry/types";
 
 import { OpenAIAdapter } from "@/adapters/llm/openai";
-import { MockLLMAdapter } from "@/adapters/llm/mock";
 import { SerperSearchAdapter } from "@/adapters/search/serper";
-import { MockSearchAdapter } from "@/adapters/search/mock";
 import {
   SafeDirectScraperAdapter,
   JinaReaderScraperAdapter,
   TinyFishScraperAdapter,
   TieredScraperAdapter,
-  MockScraperAdapter,
 } from "@/adapters/scraper";
 import { VietQrRegistryAdapter } from "@/adapters/registry";
 import { MemoryStorageAdapter } from "@/adapters/storage/memory";
@@ -41,7 +38,7 @@ export interface ResourceGuards {
 export function getGuards(): ResourceGuards {
   return {
     maxConcurrentResearch: int(process.env.MAX_CONCURRENT_RESEARCH, 1),
-    sourceTimeoutMs: int(process.env.SOURCE_TIMEOUT_MS, 30_000),
+    sourceTimeoutMs: int(process.env.SOURCE_TIMEOUT_MS, 60_000),
     maxRetriesPerSource: 2,
     maxTokensPerResearch: 50_000,
     maxLLMCallsPerResearch: 10,
@@ -64,15 +61,17 @@ let _storage: StorageAdapter | null = null;
 export function createLLMAdapter(): LLMAdapter {
   if (_llm) return _llm;
 
-  switch (process.env.LLM_PROVIDER) {
+  switch (process.env.LLM_PROVIDER || "openai") {
     case "openai":
-      _llm = new OpenAIAdapter(process.env.OPENAI_API_KEY!);
+      if (!process.env.OPENAI_API_KEY) {
+        throw new Error("OPENAI_API_KEY is required when LLM_PROVIDER=openai");
+      }
+      _llm = new OpenAIAdapter(process.env.OPENAI_API_KEY);
       break;
     case "mock":
-      _llm = new MockLLMAdapter();
-      break;
+      throw new Error("Unsupported LLM_PROVIDER=mock; use a real provider");
     default:
-      _llm = new OpenAIAdapter(process.env.OPENAI_API_KEY!);
+      throw new Error(`Unknown LLM_PROVIDER: ${process.env.LLM_PROVIDER}`);
   }
   return _llm;
 }
@@ -80,15 +79,17 @@ export function createLLMAdapter(): LLMAdapter {
 export function createSearchAdapter(): SearchAdapter {
   if (_search) return _search;
 
-  switch (process.env.SEARCH_PROVIDER) {
+  switch (process.env.SEARCH_PROVIDER || "serper") {
     case "serper":
-      _search = new SerperSearchAdapter(process.env.SERPER_API_KEY!);
+      if (!process.env.SERPER_API_KEY) {
+        throw new Error("SERPER_API_KEY is required when SEARCH_PROVIDER=serper");
+      }
+      _search = new SerperSearchAdapter(process.env.SERPER_API_KEY);
       break;
     case "mock":
-      _search = new MockSearchAdapter();
-      break;
+      throw new Error("Unsupported SEARCH_PROVIDER=mock; use a real provider");
     default:
-      _search = new SerperSearchAdapter(process.env.SERPER_API_KEY!);
+      throw new Error(`Unknown SEARCH_PROVIDER: ${process.env.SEARCH_PROVIDER}`);
   }
   return _search;
 }
@@ -99,8 +100,7 @@ export function createScraperAdapter(): ScraperAdapter {
   const provider = process.env.SCRAPER_PROVIDER || "tiered";
 
   if (provider === "mock") {
-    _scraper = new MockScraperAdapter();
-    return _scraper;
+    throw new Error("Unsupported SCRAPER_PROVIDER=mock; use a real provider");
   }
 
   if (provider === "tinyfish") {

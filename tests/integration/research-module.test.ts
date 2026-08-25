@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createResearchModule } from "@/modules/research";
-import { MockLLMAdapter } from "@/adapters/llm/mock";
-import { MockSearchAdapter } from "@/adapters/search/mock";
-import { MockScraperAdapter } from "@/adapters/scraper/mock";
+import {
+  MockLLMAdapter,
+  MockSearchAdapter,
+  MockScraperAdapter,
+} from "../helpers/mock-adapters";
 import type { RegistryAdapter } from "@/adapters/registry";
 import type { ResourceGuards } from "@/config";
 import type { CompanyInput, ResearchEvent } from "@/lib/types";

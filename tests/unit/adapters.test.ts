@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { z } from "zod";
-import { MockLLMAdapter } from "@/adapters/llm/mock";
-import { MockSearchAdapter } from "@/adapters/search/mock";
-import { MockScraperAdapter } from "@/adapters/scraper/mock";
+import {
+  MockLLMAdapter,
+  MockSearchAdapter,
+  MockScraperAdapter,
+} from "../helpers/mock-adapters";
 import { MemoryStorageAdapter } from "@/adapters/storage/memory";
 import type { CompanyProfile, ProfileDiff } from "@/lib/types";
 
@@ -54,10 +56,9 @@ describe("Adapters Unit Tests", () => {
       search = new MockSearchAdapter();
     });
 
-    it("returns dynamic fallback results for unknown query", async () => {
+    it("returns no results for unknown query", async () => {
       const results = await search.search("unknown query");
-      expect(results.length).toBeGreaterThan(0);
-      expect(results[0].title).toContain("unknown query");
+      expect(results).toEqual([]);
     });
 
     it("returns matched canned search results and respects maxResults", async () => {
@@ -94,10 +95,10 @@ describe("Adapters Unit Tests", () => {
       expect(scraper.callLog).toContain("https://fpt.com.vn");
     });
 
-    it("returns rich generic fallback content when url not explicitly set", async () => {
-      const page = await scraper.extract("https://unknown.com");
-      expect(page.title).toContain("Trang thông tin doanh nghiệp");
-      expect(page.text.length).toBeGreaterThan(100);
+    it("throws when url is not explicitly set", async () => {
+      await expect(scraper.extract("https://unknown.com")).rejects.toThrow(
+        "No mock page registered"
+      );
     });
   });
 

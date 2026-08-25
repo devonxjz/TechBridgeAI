@@ -18,47 +18,47 @@ export async function fetchRegistryData(
   scraperAdapter: ScraperAdapter,
   registryAdapter: RegistryAdapter,
 ): Promise<RawFinding[]> {
-  // 1. Try VietQR if taxId is provided
-  if (input.taxId) {
-    try {
-      const record = await registryAdapter.findByTaxId(input.taxId);
-      if (record) {
-        const details = [
-          `[Thông tin ĐKKD VietQR]`,
-          `Tên doanh nghiệp: ${record.name}`,
-          `Mã số thuế: ${record.taxId}`,
-          record.internationalName ? `Tên quốc tế: ${record.internationalName}` : null,
-          record.shortName ? `Tên viết tắt: ${record.shortName}` : null,
-          record.address ? `Địa chỉ: ${record.address}` : null,
-        ]
-          .filter(Boolean)
-          .join("\n");
+  if (!input.taxId) return [];
 
-        return [
-          {
-            source: "registry",
-            url: `https://api.vietqr.io/v2/business/${encodeURIComponent(record.taxId)}`,
-            content: details,
-            extractedAt: new Date(),
-            confidence: 0.95, // Official registry record
-            metadata: {
-              via: "vietqr",
-              taxId: record.taxId,
-              name: record.name,
-            },
+  // 1. Try VietQR if taxId is provided
+  try {
+    const record = await registryAdapter.findByTaxId(input.taxId);
+    if (record) {
+      const details = [
+        `[Thông tin ĐKKD VietQR]`,
+        `Tên doanh nghiệp: ${record.name}`,
+        `Mã số thuế: ${record.taxId}`,
+        record.internationalName ? `Tên quốc tế: ${record.internationalName}` : null,
+        record.shortName ? `Tên viết tắt: ${record.shortName}` : null,
+        record.address ? `Địa chỉ: ${record.address}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      return [
+        {
+          source: "registry",
+          url: `https://api.vietqr.io/v2/business/${encodeURIComponent(record.taxId)}`,
+          content: details,
+          extractedAt: new Date(),
+          confidence: 0.95, // Official registry record
+          metadata: {
+            via: "vietqr",
+            taxId: record.taxId,
+            name: record.name,
           },
-        ];
-      }
-    } catch (err: unknown) {
-      const reason = err instanceof RegistryError ? err.code : "lookup_failed";
-      console.log(
-        JSON.stringify({
-          event: "registry_fallback",
-          reason,
-          taxId: input.taxId,
-        }),
-      );
+        },
+      ];
     }
+  } catch (err: unknown) {
+    const reason = err instanceof RegistryError ? err.code : "lookup_failed";
+    console.log(
+      JSON.stringify({
+        event: "registry_fallback",
+        reason,
+        taxId: input.taxId,
+      }),
+    );
   }
 
   // 2. Try aggregator sites

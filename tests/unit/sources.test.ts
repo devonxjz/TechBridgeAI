@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { MockSearchAdapter } from "@/adapters/search/mock";
-import { MockScraperAdapter } from "@/adapters/scraper/mock";
+import { MockSearchAdapter, MockScraperAdapter } from "../helpers/mock-adapters";
 import { searchWeb } from "@/modules/research/sources/web-search";
 import { scrapeWebsite } from "@/modules/research/sources/website";
 import { searchNews } from "@/modules/research/sources/news";
 import { fetchRegistryData } from "@/modules/research/sources/registry";
 import { scrapeLinkedIn } from "@/modules/research/sources/linkedin";
 import {
+  createLLMAdapter,
+  createSearchAdapter,
   createScraperAdapter,
   resetAdapters,
   getGuards,
@@ -223,26 +224,17 @@ describe("Research Sources Unit Tests", () => {
       expect(logs.some((l) => l.event === "registry_fallback" && l.reason === "rate_limited")).toBe(true);
     });
 
-    it("falls back directly through aggregator without calling VietQR when taxId is missing", async () => {
+    it("skips registry lookup when taxId is missing", async () => {
       const mockRegistry: RegistryAdapter = {
         findByTaxId: vi.fn(),
       };
-
-      search.setResults("masothue.com", [
-        { title: "MST FPT", url: "https://masothue.com/0101234-fpt", snippet: "MST: 0101234, Dai dien: Truong Gia Binh" },
-      ]);
-      scraper.setPage("https://masothue.com/0101234-fpt", {
-        url: "https://masothue.com/0101234-fpt",
-        title: "Thong tin MST FPT",
-        text: "Cong ty Co phan FPT, Ma so thue 0101234567, Ngay cap giay phep kinh doanh nam 1988 boi So Ke hoach va Dau tu Ha Noi. Dia chi: Toa nha FPT, Pho Duy Tan, Cau Giay, Ha Noi.",
-      });
 
       const input: CompanyInput = { name: "FPT" };
       const findings = await fetchRegistryData(input, search, scraper, mockRegistry);
 
       expect(mockRegistry.findByTaxId).not.toHaveBeenCalled();
-      expect(findings.length).toBe(1);
-      expect(findings[0].source).toBe("registry");
+      expect(findings).toEqual([]);
+      expect(search.callLog).toEqual([]);
     });
   });
 
@@ -345,16 +337,21 @@ describe("Research Sources Unit Tests", () => {
       expect(() => createScraperAdapter()).toThrow(/No scraper tiers enabled/);
     });
 
-    it("supports legacy tinyfish provider and mock provider", () => {
+    it("supports legacy tinyfish provider", () => {
       process.env.SCRAPER_PROVIDER = "tinyfish";
       process.env.TINYFISH_API_KEY = "tf-key";
       const tf = createScraperAdapter();
       expect(tf.constructor.name).toBe("TinyFishScraperAdapter");
+    });
 
-      resetAdapters();
+    it("rejects removed mock providers", () => {
+      process.env.LLM_PROVIDER = "mock";
+      process.env.SEARCH_PROVIDER = "mock";
       process.env.SCRAPER_PROVIDER = "mock";
-      const mock = createScraperAdapter();
-      expect(mock.constructor.name).toBe("MockScraperAdapter");
+
+      expect(() => createLLMAdapter()).toThrow(/Unsupported LLM_PROVIDER/);
+      expect(() => createSearchAdapter()).toThrow(/Unsupported SEARCH_PROVIDER/);
+      expect(() => createScraperAdapter()).toThrow(/Unsupported SCRAPER_PROVIDER/);
     });
 
     it("parses guards with safe fallbacks on invalid/zero/negative env values", () => {
@@ -362,8 +359,14 @@ describe("Research Sources Unit Tests", () => {
       process.env.MAX_SCRAPE_PAGES_PER_RESEARCH = "invalid";
 
       const guards = getGuards();
-      expect(guards.sourceTimeoutMs).toBe(30_000);
+      expect(guards.sourceTimeoutMs).toBe(60_000);
       expect(guards.maxScrapePagesPerResearch).toBe(5);
+    });
+
+    it("uses a website-capable default source timeout", () => {
+      delete process.env.SOURCE_TIMEOUT_MS;
+
+      expect(getGuards().sourceTimeoutMs).toBe(60_000);
     });
   });
 });

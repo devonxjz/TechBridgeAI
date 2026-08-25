@@ -1,31 +1,41 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { vi } from "vitest";
+
+import {
+  MockLLMAdapter,
+  MockSearchAdapter,
+  MockScraperAdapter,
+} from "../helpers/mock-adapters";
+
+let llm: MockLLMAdapter;
+let search: MockSearchAdapter;
+let scraper: MockScraperAdapter;
+
+vi.mock("@/config", async () => {
+  const actual = await vi.importActual<typeof import("@/config")>("@/config");
+  return {
+    ...actual,
+    createLLMAdapter: () => llm,
+    createSearchAdapter: () => search,
+    createScraperAdapter: () => scraper,
+  };
+});
+
 import { POST } from "@/app/api/research/route";
 import { NextRequest } from "next/server";
-import {
-  createStorageAdapter,
-  createLLMAdapter,
-  createSearchAdapter,
-  createScraperAdapter,
-  resetAdapters,
-} from "@/config";
-import { MockLLMAdapter } from "@/adapters/llm/mock";
-import { MockSearchAdapter } from "@/adapters/search/mock";
-import { MockScraperAdapter } from "@/adapters/scraper/mock";
+import { createStorageAdapter, resetAdapters } from "@/config";
 import { MemoryStorageAdapter } from "@/adapters/storage/memory";
 
 describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
   beforeEach(() => {
-    process.env.LLM_PROVIDER = "mock";
-    process.env.SEARCH_PROVIDER = "mock";
-    process.env.SCRAPER_PROVIDER = "mock";
+    llm = new MockLLMAdapter();
+    search = new MockSearchAdapter();
+    scraper = new MockScraperAdapter();
     process.env.STORAGE_PROVIDER = "memory";
     resetAdapters();
   });
 
   it("handles full E2E research workflow with SSE stream and versioned updates", async () => {
-    const llm = createLLMAdapter() as MockLLMAdapter;
-    const search = createSearchAdapter() as MockSearchAdapter;
-    const scraper = createScraperAdapter() as MockScraperAdapter;
     const storage = createStorageAdapter() as MemoryStorageAdapter;
     storage.clear();
 
@@ -147,5 +157,31 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: string };
     expect(body.error).toBeDefined();
+  });
+
+  it("preserves provider errors when no source returns findings", async () => {
+    search.search = async () => {
+      throw new Error("Serper search failed: 403 Unauthorized");
+    };
+    scraper.extract = async () => {
+      throw new Error("TinyFish request timed out");
+    };
+
+    const response = await POST(
+      new NextRequest("http://localhost:3000/api/research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "EDUZ", website: "https://eduz.vn" }),
+      }),
+    );
+
+    const text = await response.text();
+    const errorMessages = text
+      .split("\n\n")
+      .filter((block) => block.startsWith("event: error"))
+      .map((block) => JSON.parse(block.split("data: ")[1]).message as string);
+
+    expect(errorMessages.at(-1)).toContain("Serper search failed: 403 Unauthorized");
+    expect(errorMessages.at(-1)).toContain("TinyFish request timed out");
   });
 });

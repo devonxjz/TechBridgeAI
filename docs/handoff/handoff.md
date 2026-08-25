@@ -49,9 +49,9 @@ src/
 │   ├── profile/                    # Profile builder (OpenAI JSON schema) + Diff engine
 │   └── analyst/                    # 5-factor Fit Score calculator & risk detector
 ├── adapters/                       # Swappable Infrastructure Ports
-│   ├── llm/                        # OpenAIAdapter (gpt-4o-mini), MockLLMAdapter
-│   ├── search/                     # SerperSearchAdapter, MockSearchAdapter
-│   ├── scraper/                    # TinyFishScraperAdapter, MockScraperAdapter
+│   ├── llm/                        # OpenAIAdapter (gpt-4o-mini)
+│   ├── search/                     # SerperSearchAdapter
+│   ├── scraper/                    # TinyFishScraperAdapter, tiered real scrapers
 │   └── storage/                    # SupabaseStorageAdapter, MemoryStorageAdapter
 ├── config/index.ts                 # Adapter Factory (DI via environment variables)
 └── lib/
@@ -67,7 +67,7 @@ src/
 - **Environment File**: `.env` (and synchronized `.env.local` for Next.js).
 - **Active Providers**:
   - `LLM_PROVIDER=openai` (OpenAI `gpt-4o-mini` with fallback to Gemini)
-  - `SEARCH_PROVIDER=mock` (Deterministic rich mock results, switchable to `serper`)
+  - `SEARCH_PROVIDER=serper` (Live Google Search results via Serper)
   - `SCRAPER_PROVIDER=tinyfish` (TinyFish extraction with direct HTML fallback)
   - `STORAGE_PROVIDER=supabase` (Supabase PostgreSQL JSONB tables)
 - **Supabase Tables Created & Verified**:
@@ -94,8 +94,8 @@ src/
    - Link repository `devonxjz/TechBridgeAI` on [Vercel](https://vercel.com).
    - Add environment variables (`LLM_PROVIDER`, `OPENAI_API_KEY`, `STORAGE_PROVIDER`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SCRAPER_PROVIDER`, `TINYFISH_API_KEY`).
    - Trigger deployment to get public HTTPS URL.
-2. **Search Provider Upgrade (Optional)**:
-   - Provide a Serper key in `SERPER_API_KEY` and set `SEARCH_PROVIDER=serper` if live web queries are desired for production.
+2. **Search Provider**:
+   - Provide a Serper key in `SERPER_API_KEY`; live search is required for production research.
 3. **Live Demo & Presentation**:
    - Follow the 3–5 minute live presentation script in [`docs/DEMO_SCRIPT.md`](../DEMO_SCRIPT.md) with demo companies (*FPT Corporation, Tập đoàn Vingroup, MISA*).
 

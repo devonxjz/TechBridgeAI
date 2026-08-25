@@ -47,6 +47,7 @@ export async function POST(req: NextRequest) {
     (async () => {
       try {
         const allFindings: RawFinding[] = [];
+        const sourceErrors: string[] = [];
 
         // Determine active sources
         const sources = ["web_search", "website", "news", "registry"];
@@ -77,6 +78,7 @@ export async function POST(req: NextRequest) {
               } as StreamEvent);
               break;
             case "error":
+              sourceErrors.push(`${event.source}: ${event.error}`);
               writer.write({
                 event: "error",
                 data: { message: event.error, source: event.source },
@@ -86,9 +88,14 @@ export async function POST(req: NextRequest) {
         }
 
         if (allFindings.length === 0) {
+          const detail = sourceErrors.length > 0
+            ? ` Chi tiết: ${sourceErrors.join(" | ")}`
+            : "";
           writer.write({
             event: "error",
-            data: { message: "Không tìm thấy thông tin nào về công ty này." },
+            data: {
+              message: `Không tìm thấy thông tin nào về công ty này.${detail}`,
+            },
           } as StreamEvent);
           writer.write({ event: "done", data: {} } as StreamEvent);
           writer.close();

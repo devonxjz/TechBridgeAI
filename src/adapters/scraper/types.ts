@@ -2,7 +2,7 @@
 // Scraper Adapter — Interface & Error Types
 // ═══════════════════════════════════════════════════════
 
-export type ScraperProvider = "direct" | "jina" | "tinyfish" | "mock";
+export type ScraperProvider = "direct" | "jina" | "tinyfish";
 
 export type ScrapeErrorCode =
   | "blocked"

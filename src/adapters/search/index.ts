@@ -4,4 +4,3 @@ export {
   type SearchResult,
 } from "./types";
 export { SerperSearchAdapter } from "./serper";
-export { MockSearchAdapter } from "./mock";

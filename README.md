@@ -25,7 +25,7 @@
 ## 🌟 Tính Năng Nổi Bật
 
 * 🌐 **Multi-source Research Pipeline (Thu thập đa nguồn thời gian thực):**
-  * 🔍 **Web Search:** Tích hợp Serper Google Search API với fallback thông minh sang Mock Data.
+  * 🔍 **Web Search:** Tích hợp Serper Google Search API và chỉ tổng hợp dữ liệu trả về từ nguồn thật.
   * 🛡️ **Tiered Website Scraper (3 cấp độ tự phục hồi):** Chuỗi fallback `SafeDirect → Jina Reader → TinyFish` với cơ chế chống SSRF (Private IP/Localhost block), DNS Pinning, giới hạn luồng 1MB và bộ lọc HTML tuyến tính an toàn.
   * 🏛️ **VietQR Official Business Registry:** Tra cứu trực tiếp thông tin doanh nghiệp qua Mã số thuế (MST) với in-memory caching (7 ngày), tự động fallback sang Aggregator Search khi API nghẽn.
   * 📰 **Tin tức kinh doanh Việt Nam:** Tự động tìm kiếm các bài viết từ CafeF, Báo Đầu tư, VnExpress, Vietstock...
@@ -76,10 +76,10 @@ graph TB
   end
 
   subgraph Adapters ["4. Infrastructure Adapters"]
-    OpenAI["OpenAI (gpt-4o-mini) / Mock"]
-    Serper["Google Search (Serper API) / Mock"]
+    OpenAI["OpenAI (gpt-4o-mini)"]
+    Serper["Google Search (Serper API)"]
     TieredScraper["Tiered Scraper (SafeDirect -> Jina -> TinyFish)"]
-    VietQR["VietQR Business Registry API / Mock"]
+    VietQR["VietQR Business Registry API"]
     Supabase["Supabase PostgreSQL (JSONB) / Memory"]
   end
 
@@ -333,18 +333,8 @@ classDiagram
     +stream()
   }
 
-  class MockLLMAdapter {
-    +complete()
-    +completeStructured()
-    +stream()
-  }
-
   class SerperSearchAdapter {
     -string apiKey
-    +search()
-  }
-
-  class MockSearchAdapter {
     +search()
   }
 
@@ -393,10 +383,7 @@ classDiagram
 
   %% Relationships & Implementations
   LLMAdapter <|.. OpenAILLMAdapter : implements
-  LLMAdapter <|.. MockLLMAdapter : implements
-
   SearchAdapter <|.. SerperSearchAdapter : implements
-  SearchAdapter <|.. MockSearchAdapter : implements
 
   ScraperAdapter <|.. TieredScraperAdapter : implements
   ScraperAdapter <|.. DirectScraperAdapter : implements
@@ -478,16 +465,16 @@ sequenceDiagram
 ### File `.env.local` mẫu
 
 ```dotenv
-# ─── LLM Provider (openai | mock) ───
+# ─── LLM Provider ───
 LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-...
 
-# ─── Search Provider (serper | mock) ───
+# ─── Search Provider ───
 SEARCH_PROVIDER=serper
 SERPER_API_KEY=...
 
 # ─── Scraper Provider & Fallback Chain ───
-SCRAPER_PROVIDER=tiered           # tiered | tinyfish | mock
+SCRAPER_PROVIDER=tiered           # tiered | tinyfish
 SCRAPER_DIRECT_ENABLED=true       # Tier 1: Direct HTTP scraper + SSRF Guard
 SCRAPER_JINA_ENABLED=true         # Tier 2: Jina AI Reader
 SCRAPER_TINYFISH_ENABLED=true     # Tier 3: TinyFish API
@@ -544,7 +531,7 @@ Tạo file `.env.local` từ file mẫu:
 ```bash
 cp .env.example .env.local
 ```
-*(Điền các API Key cần thiết như `OPENAI_API_KEY`, `SERPER_API_KEY`, `SUPABASE_URL`,... Hoặc để cấu hình mock để chạy thử nghiệm offline hoàn toàn miễn phí).*
+*(Điền các API Key cần thiết như `OPENAI_API_KEY`, `SERPER_API_KEY`, `SUPABASE_URL`,...)*
 
 ### 4. Khởi chạy máy chủ phát triển
 ```bash
