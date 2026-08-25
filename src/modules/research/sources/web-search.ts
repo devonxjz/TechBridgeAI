@@ -1,9 +1,6 @@
-// ═══════════════════════════════════════════════════════
-// Research Module — Source: Web Search
-// ═══════════════════════════════════════════════════════
-
 import type { CompanyInput, RawFinding } from "@/lib/types";
 import type { SearchAdapter } from "@/adapters/search/types";
+import { buildResearchQueries } from "../queries";
 
 /**
  * Search the web for company information.
@@ -11,9 +8,10 @@ import type { SearchAdapter } from "@/adapters/search/types";
  */
 export async function searchWeb(
   input: CompanyInput,
-  searchAdapter: SearchAdapter
+  searchAdapter: SearchAdapter,
+  customQueries?: string[]
 ): Promise<RawFinding[]> {
-  const queries = buildSearchQueries(input);
+  const queries = customQueries ?? buildResearchQueries(input).web;
   const findings: RawFinding[] = [];
 
   for (const query of queries) {
@@ -38,25 +36,3 @@ export async function searchWeb(
   return findings;
 }
 
-function buildSearchQueries(input: CompanyInput): string[] {
-  const queries: string[] = [];
-  const name = input.name;
-
-  // Primary query
-  queries.push(`"${name}" công ty thông tin`);
-
-  // Products/services query
-  queries.push(`"${name}" sản phẩm dịch vụ ngành nghề`);
-
-  // If tax ID provided, search specifically
-  if (input.taxId) {
-    queries.push(`"${input.taxId}" mã số thuế doanh nghiệp`);
-  }
-
-  // Additional keywords
-  if (input.additionalKeywords?.length) {
-    queries.push(`"${name}" ${input.additionalKeywords.join(" ")}`);
-  }
-
-  return queries;
-}

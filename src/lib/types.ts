@@ -228,3 +228,22 @@ export interface SourceError {
 export type SourceResult =
   | { ok: true; findings: RawFinding[] }
   | { ok: false; error: SourceError };
+
+export type SourceExecutionStatus = "succeeded" | "failed" | "skipped";
+export type ResearchOutcome = "running" | "complete" | "partial" | "failed";
+
+export interface SourceExecutionResult {
+  source: SourceName;
+  status: SourceExecutionStatus;
+  findings: RawFinding[];
+  error?: SourceError;
+  attempts: number;
+  durationMs: number;
+}
+
+export interface PreparedEvidence {
+  findings: RawFinding[];
+  sourceCoverage: number;
+  outcome: Exclude<ResearchOutcome, "running">;
+}
+

@@ -1,21 +1,16 @@
-// ═══════════════════════════════════════════════════════
-// Research Module — Source: News
-// ═══════════════════════════════════════════════════════
-
 import type { CompanyInput, RawFinding } from "@/lib/types";
 import type { SearchAdapter } from "@/adapters/search/types";
+import { buildResearchQueries } from "../queries";
 
 /**
  * Search for recent news about the company.
  */
 export async function searchNews(
   input: CompanyInput,
-  searchAdapter: SearchAdapter
+  searchAdapter: SearchAdapter,
+  customQueries?: string[]
 ): Promise<RawFinding[]> {
-  const queries = [
-    `"${input.name}" tin tức mới nhất`,
-    `"${input.name}" news`,
-  ];
+  const queries = customQueries ?? buildResearchQueries(input).news;
 
   const findings: RawFinding[] = [];
 
@@ -45,3 +40,4 @@ export async function searchNews(
 
   return findings;
 }
+

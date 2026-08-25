@@ -4,11 +4,23 @@
 
 import { z } from "zod";
 
+export interface LLMBudget {
+  claimModelCall(estimatedInputTokens: number): void;
+  recordModelUsage(usage: LLMUsageLog): void;
+}
+
+export interface LLMInvocationContext {
+  signal?: AbortSignal;
+  callbacks?: readonly unknown[];
+  budget?: LLMBudget;
+}
+
 export interface LLMOptions {
   model?: string;
   temperature?: number;
   maxTokens?: number;
   systemPrompt?: string;
+  context?: LLMInvocationContext;
 }
 
 export interface LLMUsageLog {
@@ -30,4 +42,6 @@ export interface LLMAdapter {
     prompt: string,
     options?: LLMOptions
   ): AsyncGenerator<string, void, unknown>;
+  getUsageLogs?(): LLMUsageLog[];
 }
+

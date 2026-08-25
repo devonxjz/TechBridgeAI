@@ -16,6 +16,9 @@ describe("ResearchModule Integration Tests", () => {
   let registry: RegistryAdapter;
   const guards: ResourceGuards = {
     maxConcurrentResearch: 1,
+    maxQueriesPerResearch: 6,
+    maxConcurrentSourceNodes: 3,
+    maxConcurrentProviderCalls: 2,
     sourceTimeoutMs: 5000,
     maxRetriesPerSource: 2,
     maxTokensPerResearch: 50000,
