@@ -9,7 +9,6 @@ import { dispatchCustomEvent } from "@langchain/core/callbacks/dispatch";
 import type { Callbacks } from "@langchain/core/callbacks/manager";
 import type {
   CompanyInput,
-  RawFinding,
   SourceError,
   SourceExecutionResult,
   SourceName,
@@ -69,126 +68,6 @@ export function createResearchWorkflow(deps: ResearchWorkflowDeps): ResearchWork
     registry: deps.registry,
     guards: deps.guards,
   });
-
-  const runSource = async (
-    source: SourceName,
-    runner: ResearchSourceRunner,
-    input: CompanyInput,
-    budget: ResearchBudget,
-    signal?: AbortSignal
-  ): Promise<SourceExecutionResult> => {
-    const startTime = Date.now();
-
-    if (signal?.aborted) {
-      return {
-        source,
-        status: "failed",
-        findings: [],
-        error: {
-          source,
-          type: "network_error",
-          message: "Execution aborted",
-          retryable: false,
-        },
-        attempts: 1,
-        durationMs: 0,
-      };
-    }
-
-    await dispatchCustomEvent("sse_event", {
-      event: "research:progress",
-      data: { source, status: "started" },
-    } as StreamEvent);
-
-    let attempts = 0;
-    const maxRetries = deps.guards.maxRetriesPerSource ?? 2;
-    let lastError: SourceError | undefined;
-
-    const providerType: "search" | "scraper" | "registry" =
-      source === "registry"
-        ? "registry"
-        : source === "website" || source === "linkedin"
-        ? "scraper"
-        : "search";
-
-    while (attempts <= maxRetries) {
-      attempts++;
-      try {
-        if (signal?.aborted) {
-          throw new Error("Execution aborted");
-        }
-
-        const findings = await budget.runWithProviderSlot(providerType, async () => {
-          return await Promise.race([
-            runner(input),
-            new Promise<never>((_, reject) =>
-              setTimeout(
-                () => reject(new Error(`Source ${source} timed out after ${deps.guards.sourceTimeoutMs}ms`)),
-                deps.guards.sourceTimeoutMs
-              )
-            ),
-          ]);
-        });
-
-        for (const finding of findings) {
-          await dispatchCustomEvent("sse_event", {
-            event: "research:finding",
-            data: {
-              source: finding.source,
-              summary: finding.content.slice(0, 200),
-            },
-          } as StreamEvent);
-        }
-
-        await dispatchCustomEvent("sse_event", {
-          event: "research:progress",
-          data: { source, status: "done" },
-        } as StreamEvent);
-
-        return {
-          source,
-          status: "succeeded",
-          findings,
-          attempts,
-          durationMs: Date.now() - startTime,
-        };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        const isTimeout = message.includes("timed out");
-        const retryable = (isTimeout || message.includes("50") || message.includes("429")) && attempts <= maxRetries;
-
-        lastError = {
-          source,
-          type: isTimeout ? "timeout" : "network_error",
-          message,
-          retryable,
-        };
-
-        if (!retryable || attempts > maxRetries) {
-          break;
-        }
-      }
-    }
-
-    await dispatchCustomEvent("sse_event", {
-      event: "error",
-      data: { message: lastError?.message ?? "Source execution failed", source },
-    } as StreamEvent);
-
-    await dispatchCustomEvent("sse_event", {
-      event: "research:progress",
-      data: { source, status: "failed" },
-    } as StreamEvent);
-
-    return {
-      source,
-      status: "failed",
-      findings: [],
-      error: lastError,
-      attempts,
-      durationMs: Date.now() - startTime,
-    };
-  };
 
   return {
     async run(input, options) {

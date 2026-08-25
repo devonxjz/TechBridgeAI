@@ -206,8 +206,11 @@ describe("ResearchWorkflow (LangGraph StateGraph)", () => {
       events.push(event);
     }
 
-    const progressEvents = events.filter((e) => e.event === "research:progress");
-    expect(progressEvents.some((p: any) => p.data.status === "failed")).toBe(true);
+    const progressEvents = events.filter(
+      (e): e is Extract<StreamEvent, { event: "research:progress" }> =>
+        e.event === "research:progress"
+    );
+    expect(progressEvents.some((p) => p.data.status === "failed")).toBe(true);
 
     const profileReady = events.find((e) => e.event === "profile:ready");
     expect(profileReady).toBeDefined();

@@ -2,7 +2,7 @@
 
 > **Execution:** Implement ticket-by-ticket. Tickets in the same wave may run in parallel only when their file scopes do not overlap. Every ticket follows RED → GREEN → review → commit.
 
-**Status:** Planned
+**Status:** Completed ✅
 
 **Branch:** `codex/partneriq-langgraph-langfuse`
 

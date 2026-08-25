@@ -3,8 +3,10 @@ import { z } from "zod";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { ChatGeneration, ChatResult } from "@langchain/core/outputs";
+import { RunnableLambda } from "@langchain/core/runnables";
+import type { ChatOpenAI } from "@langchain/openai";
 import { OpenAIAdapter } from "@/adapters/llm/openai";
-import type { LLMOptions, LLMUsageLog } from "@/adapters/llm/types";
+import type { LLMOptions } from "@/adapters/llm/types";
 
 class FakeChatModel extends BaseChatModel {
   lastSignal?: AbortSignal;
@@ -22,7 +24,7 @@ class FakeChatModel extends BaseChatModel {
 
   async _generate(
     _messages: BaseMessage[],
-    options?: any
+    options?: { signal?: AbortSignal; callbacks?: unknown }
   ): Promise<ChatResult> {
     this.lastSignal = options?.signal;
     this.lastCallbacks = options?.callbacks;
@@ -35,16 +37,16 @@ class FakeChatModel extends BaseChatModel {
     };
   }
 
-  withStructuredOutput<T>(schema: z.ZodSchema<T>) {
-    return {
-      invoke: async (messages: BaseMessage[], options?: any) => {
-        this.lastSignal = options?.signal;
-        this.lastCallbacks = options?.callbacks;
-        const msg = this.responses.shift();
-        const text = msg ? (msg.content as string) : '{"name":"FPT"}';
-        return schema.parse(JSON.parse(text));
-      },
-    } as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  override withStructuredOutput(schema: any): any {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return RunnableLambda.from(async (_input: any, options?: any) => {
+      this.lastSignal = options?.signal;
+      this.lastCallbacks = options?.callbacks;
+      const msg = this.responses.shift();
+      const text = msg ? (msg.content as string) : '{"name":"FPT"}';
+      return (schema as z.ZodSchema).parse(JSON.parse(text));
+    });
   }
 }
 
@@ -58,7 +60,7 @@ describe("LangChain-backed LLM Adapter", () => {
     ]);
 
     const adapter = new OpenAIAdapter("test-key", {
-      modelFactory: () => fakeModel as any,
+      modelFactory: () => fakeModel as unknown as ChatOpenAI,
     });
 
     const result = await adapter.complete("hello");
@@ -76,7 +78,7 @@ describe("LangChain-backed LLM Adapter", () => {
     ]);
 
     const adapter = new OpenAIAdapter("test-key", {
-      modelFactory: () => fakeModel as any,
+      modelFactory: () => fakeModel as unknown as ChatOpenAI,
     });
 
     const result = await adapter.completeStructured("extract company", schema);
@@ -86,7 +88,7 @@ describe("LangChain-backed LLM Adapter", () => {
   it("forwards signal, callbacks, and claims budget", async () => {
     const fakeModel = new FakeChatModel();
     const adapter = new OpenAIAdapter("test-key", {
-      modelFactory: () => fakeModel as any,
+      modelFactory: () => fakeModel as unknown as ChatOpenAI,
     });
 
     const controller = new AbortController();
@@ -95,7 +97,9 @@ describe("LangChain-backed LLM Adapter", () => {
       claimModelCall: (tokens: number) => {
         claimed += tokens;
       },
-      recordModelUsage: (_usage: LLMUsageLog) => {},
+      recordModelUsage: () => {
+        // no-op
+      },
     };
 
     const callback = {
