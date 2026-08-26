@@ -21,6 +21,38 @@ export type CacheDecision =
   | { kind: "miss" }
   | { kind: "conflict"; taxCompanyId: string; domainCompanyIds: string[] };
 
+export class IdentityConflictError extends Error {
+  readonly code = "identity_conflict";
+  constructor(message = "Thông tin định danh công ty mâu thuẫn.") {
+    super(message);
+    this.name = "IdentityConflictError";
+  }
+}
+
+export class CacheInvalidError extends Error {
+  readonly code = "cache_invalid";
+  constructor(message = "Dữ liệu cache không hợp lệ.") {
+    super(message);
+    this.name = "CacheInvalidError";
+  }
+}
+
+export class InvalidCacheSelectionError extends Error {
+  readonly code = "invalid_cache_selection";
+  constructor(message = "Lựa chọn cache không hợp lệ với dữ liệu nhập.") {
+    super(message);
+    this.name = "InvalidCacheSelectionError";
+  }
+}
+
+export class CacheUnavailableError extends Error {
+  readonly code = "cache_unavailable";
+  constructor(message = "Dịch vụ cache tạm thời không khả dụng.") {
+    super(message);
+    this.name = "CacheUnavailableError";
+  }
+}
+
 export function normalizeTaxId(value?: string): string | null {
   if (!value) return null;
   const normalized = value.trim().replace(/[\s.-]/g, "");
