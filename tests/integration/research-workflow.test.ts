@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import { createResearchWorkflow } from "@/modules/workflow";
 import { createProfileModule } from "@/modules/profile";
 import { createAnalystModule } from "@/modules/analyst";
@@ -9,8 +9,10 @@ import {
   MockScraperAdapter,
 } from "../helpers/mock-adapters";
 import type { RegistryAdapter } from "@/adapters/registry";
+import type { SearchOptions } from "@/adapters/search/types";
 import type { ResourceGuards } from "@/config";
 import type { CompanyInput, StreamEvent } from "@/lib/types";
+import * as langfuseObservability from "@/observability/langfuse";
 
 describe("ResearchWorkflow (LangGraph StateGraph)", () => {
   let llm: MockLLMAdapter;
@@ -91,6 +93,422 @@ describe("ResearchWorkflow (LangGraph StateGraph)", () => {
     llm.setResponse("", JSON.stringify(mockProfileData));
   });
 
+  function buildWorkflow() {
+    return createResearchWorkflow({
+      search,
+      scraper,
+      registry,
+      storage,
+      profile: createProfileModule({ llm }),
+      analyst: createAnalystModule({ llm }),
+      guards,
+    });
+  }
+
+  it("limits each search request at the provider boundary", async () => {
+    guards.maxConcurrentProviderCalls = 1;
+    guards.maxQueriesPerResearch = 2;
+    guards.maxScrapePagesPerResearch = 1;
+
+    let activeSearchCalls = 0;
+    let maxActiveSearchCalls = 0;
+    search.search = async (query: string) => {
+      activeSearchCalls++;
+      maxActiveSearchCalls = Math.max(maxActiveSearchCalls, activeSearchCalls);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      activeSearchCalls--;
+      return [
+        {
+          title: query,
+          url: `https://example.com/${encodeURIComponent(query)}`,
+          snippet: "Company information",
+        },
+      ];
+    };
+    scraper.extract = async (url: string) => ({
+      url,
+      title: "Company",
+      text: "Company website content long enough to become a research finding.",
+    });
+
+    await buildWorkflow().run(
+      { name: "FPT", website: "https://fpt.com.vn" },
+      { researchRunId: "provider-limit", signal: new AbortController().signal },
+    );
+
+    expect(maxActiveSearchCalls).toBe(1);
+  });
+
+  it("honors the shared query guard across web and news", async () => {
+    guards.maxQueriesPerResearch = 2;
+    guards.maxScrapePagesPerResearch = 1;
+    let searchCalls = 0;
+
+    search.search = async (query: string) => {
+      searchCalls++;
+      return [
+        {
+          title: query,
+          url: `https://example.com/${searchCalls}`,
+          snippet: "Company information",
+        },
+      ];
+    };
+    scraper.extract = async (url: string) => ({
+      url,
+      title: "Company",
+      text: "Company website content long enough to become a research finding.",
+    });
+
+    await buildWorkflow().run(
+      { name: "FPT", website: "https://fpt.com.vn" },
+      { researchRunId: "query-limit", signal: new AbortController().signal },
+    );
+
+    expect(searchCalls).toBe(2);
+  });
+
+  it("includes website discovery and registry fallbacks in the shared query guard", async () => {
+    guards.maxQueriesPerResearch = 2;
+    let searchCalls = 0;
+    search.search = async () => {
+      searchCalls++;
+      return [];
+    };
+
+    const state = await buildWorkflow().run(
+      { name: "FPT", taxId: "0101248141" },
+      { researchRunId: "all-search-query-limit" },
+    );
+
+    expect(searchCalls).toBe(2);
+    expect(state.sourceResults.find((result) => result.source === "website")?.status)
+      .toBe("skipped");
+  });
+
+  it("passes an abort signal into every search request", async () => {
+    guards.maxQueriesPerResearch = 2;
+    guards.maxScrapePagesPerResearch = 1;
+    const receivedSignals: Array<AbortSignal | undefined> = [];
+
+    search.search = async (query: string, options?: SearchOptions) => {
+      receivedSignals.push(
+        (options as SearchOptions & { signal?: AbortSignal } | undefined)?.signal,
+      );
+      return [
+        {
+          title: query,
+          url: `https://example.com/${encodeURIComponent(query)}`,
+          snippet: "Company information",
+        },
+      ];
+    };
+    scraper.extract = async (url: string) => ({
+      url,
+      title: "Company",
+      text: "Company website content long enough to become a research finding.",
+    });
+
+    await buildWorkflow().run(
+      { name: "FPT", website: "https://fpt.com.vn" },
+      { researchRunId: "signal-propagation", signal: new AbortController().signal },
+    );
+
+    expect(receivedSignals.length).toBeGreaterThan(0);
+    expect(receivedSignals.every(Boolean)).toBe(true);
+  });
+
+  it("does not retry errors that merely contain a 5xx-like record count", async () => {
+    guards.maxQueriesPerResearch = 20;
+    guards.maxScrapePagesPerResearch = 1;
+    let searchCalls = 0;
+    search.search = async () => {
+      searchCalls++;
+      throw new Error("Validation failed for 500 records");
+    };
+    scraper.extract = async (url: string) => ({
+      url,
+      title: "Company",
+      text: "Company website content long enough to preserve sibling findings.",
+    });
+
+    await buildWorkflow().run(
+      { name: "FPT", website: "https://fpt.com.vn" },
+      { researchRunId: "non-retryable-error" },
+    );
+
+    expect(searchCalls).toBe(6);
+  });
+
+  it("passes the run budget and signal into every model call", async () => {
+    guards.maxQueriesPerResearch = 2;
+    guards.maxScrapePagesPerResearch = 1;
+    search.setResults("FPT", [
+      {
+        title: "FPT",
+        url: "https://fpt.com.vn/about",
+        snippet: "FPT company information",
+      },
+    ]);
+    scraper.extract = async (url: string) => ({
+      url,
+      title: "FPT",
+      text: "FPT company website content long enough for profile synthesis.",
+    });
+    const controller = new AbortController();
+
+    await buildWorkflow().run(
+      { name: "FPT", website: "https://fpt.com.vn" },
+      { researchRunId: "llm-context", signal: controller.signal },
+    );
+
+    expect(llm.callLog.length).toBeGreaterThanOrEqual(2);
+    expect(
+      llm.callLog.every(
+        ({ options }) =>
+          options?.context?.budget !== undefined &&
+          options.context.signal === controller.signal,
+      ),
+    ).toBe(true);
+  });
+
+  it("emits a fatal error and withholds profile-ready when persistence fails", async () => {
+    guards.maxQueriesPerResearch = 2;
+    guards.maxScrapePagesPerResearch = 1;
+    search.setResults("FPT", [
+      {
+        title: "FPT",
+        url: "https://fpt.com.vn/about",
+        snippet: "FPT company information",
+      },
+    ]);
+    scraper.extract = async (url: string) => ({
+      url,
+      title: "FPT",
+      text: "FPT company website content long enough for profile synthesis.",
+    });
+    storage.saveProfile = async () => {
+      throw new Error("Profile storage unavailable");
+    };
+    const observationOutcome = vi.spyOn(
+      langfuseObservability,
+      "updateResearchObservationOutcome",
+    );
+
+    const events: StreamEvent[] = [];
+    for await (const event of buildWorkflow().stream(
+      { name: "FPT", website: "https://fpt.com.vn" },
+      { researchRunId: "persistence-failure" },
+    )) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual({
+      event: "error",
+      data: { message: "Profile storage unavailable" },
+    });
+    expect(events.some((event) => event.event === "profile:ready")).toBe(false);
+    expect(observationOutcome).toHaveBeenCalledWith("failed");
+    observationOutcome.mockRestore();
+  });
+
+  it("aborts an in-flight profile write when the run is cancelled", async () => {
+    guards.maxQueriesPerResearch = 2;
+    guards.maxScrapePagesPerResearch = 1;
+    search.setResults("FPT", [
+      {
+        title: "FPT",
+        url: "https://fpt.com.vn/about",
+        snippet: "FPT company information",
+      },
+    ]);
+    scraper.extract = async (url: string) => ({
+      url,
+      title: "FPT",
+      text: "FPT company website content long enough for profile synthesis.",
+    });
+    let markWriteStarted: () => void = () => undefined;
+    const writeStarted = new Promise<void>((resolve) => {
+      markWriteStarted = resolve;
+    });
+    let writeAborted = false;
+    storage.saveProfile = async (
+      _profile,
+      options?: { signal?: AbortSignal },
+    ) => {
+      markWriteStarted();
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(resolve, 30);
+        options?.signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timeout);
+            writeAborted = true;
+            reject(options.signal?.reason);
+          },
+          { once: true },
+        );
+      });
+    };
+    const controller = new AbortController();
+    const events: StreamEvent[] = [];
+
+    const consume = (async () => {
+      for await (const event of buildWorkflow().stream(
+        { name: "FPT", website: "https://fpt.com.vn" },
+        { researchRunId: "cancel-persistence", signal: controller.signal },
+      )) {
+        events.push(event);
+      }
+    })();
+    await writeStarted;
+    controller.abort();
+    await consume.catch(() => undefined);
+
+    expect(writeAborted).toBe(true);
+    expect(events.some((event) => event.event === "profile:ready")).toBe(false);
+  });
+
+  it("stops before profile synthesis when existing-profile storage fails", async () => {
+    guards.maxQueriesPerResearch = 2;
+    guards.maxScrapePagesPerResearch = 1;
+    search.setResults("FPT", [
+      {
+        title: "FPT",
+        url: "https://fpt.com.vn/about",
+        snippet: "FPT company information",
+      },
+    ]);
+    scraper.extract = async (url: string) => ({
+      url,
+      title: "FPT",
+      text: "FPT company website content long enough for profile synthesis.",
+    });
+    storage.getLatestProfile = async () => {
+      throw new Error("Profile storage read unavailable");
+    };
+
+    const events: StreamEvent[] = [];
+    for await (const event of buildWorkflow().stream(
+      { name: "FPT", website: "https://fpt.com.vn" },
+      { researchRunId: "storage-read-failure" },
+    )) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual({
+      event: "error",
+      data: { message: "Profile storage read unavailable" },
+    });
+    expect(events.some((event) => event.event === "profile:building")).toBe(false);
+  });
+
+  it("passes the run signal into the existing-profile read", async () => {
+    guards.maxQueriesPerResearch = 2;
+    guards.maxScrapePagesPerResearch = 1;
+    search.setResults("FPT", [
+      {
+        title: "FPT",
+        url: "https://fpt.com.vn/about",
+        snippet: "FPT company information",
+      },
+    ]);
+    scraper.extract = async (url: string) => ({
+      url,
+      title: "FPT",
+      text: "FPT company website content long enough for profile synthesis.",
+    });
+    let receivedSignal: AbortSignal | undefined;
+    storage.getLatestProfile = async (
+      _companyId: string,
+      options?: { signal?: AbortSignal },
+    ) => {
+      receivedSignal = options?.signal;
+      return null;
+    };
+    const controller = new AbortController();
+
+    await buildWorkflow().run(
+      { name: "FPT", website: "https://fpt.com.vn" },
+      { researchRunId: "storage-read-signal", signal: controller.signal },
+    );
+
+    expect(receivedSignal).toBe(controller.signal);
+  });
+
+  it("treats diff persistence failure as fatal", async () => {
+    guards.maxQueriesPerResearch = 2;
+    guards.maxScrapePagesPerResearch = 1;
+    search.setResults("FPT", [
+      {
+        title: "FPT",
+        url: "https://fpt.com.vn/about",
+        snippet: "FPT company information",
+      },
+    ]);
+    scraper.extract = async (url: string) => ({
+      url,
+      title: "FPT",
+      text: "FPT company website content long enough for profile synthesis.",
+    });
+    const workflow = buildWorkflow();
+    await workflow.run(
+      { name: "FPT", website: "https://fpt.com.vn" },
+      { researchRunId: "diff-v1" },
+    );
+    storage.saveDiff = async () => {
+      throw new Error("Diff storage unavailable");
+    };
+
+    const events: StreamEvent[] = [];
+    for await (const event of workflow.stream(
+      { name: "FPT", website: "https://fpt.com.vn" },
+      { researchRunId: "diff-v2" },
+    )) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual({
+      event: "error",
+      data: { message: "Diff storage unavailable" },
+    });
+    expect(events.some((event) => event.event === "analysis:ready")).toBe(false);
+  });
+
+  it("reports the terminal workflow state to its completion hook", async () => {
+    guards.maxQueriesPerResearch = 2;
+    guards.maxScrapePagesPerResearch = 1;
+    search.setResults("FPT", [
+      {
+        title: "FPT",
+        url: "https://fpt.com.vn/about",
+        snippet: "FPT company information",
+      },
+    ]);
+    scraper.extract = async (url: string) => ({
+      url,
+      title: "FPT",
+      text: "FPT company website content long enough for profile synthesis.",
+    });
+    let completedOutcome: string | undefined;
+
+    for await (const event of buildWorkflow().stream(
+      { name: "FPT", website: "https://fpt.com.vn" },
+      {
+        researchRunId: "completion-hook",
+        onComplete: (state: { outcome: string }) => {
+          completedOutcome = state.outcome;
+        },
+      } as Parameters<ReturnType<typeof buildWorkflow>["stream"]>[1] & {
+        onComplete: (state: { outcome: string }) => void;
+      },
+    )) {
+      void event;
+    }
+
+    expect(completedOutcome).toBe("partial");
+  });
+
   it("runs sources concurrently and prepares deterministic evidence", async () => {
     let activeSources = 0;
     let maxConcurrency = 0;
@@ -134,7 +552,6 @@ describe("ResearchWorkflow (LangGraph StateGraph)", () => {
     const analystModule = createAnalystModule({ llm });
 
     const workflow = createResearchWorkflow({
-      llm,
       search,
       scraper,
       registry,
@@ -183,7 +600,6 @@ describe("ResearchWorkflow (LangGraph StateGraph)", () => {
     const analystModule = createAnalystModule({ llm });
 
     const workflow = createResearchWorkflow({
-      llm,
       search,
       scraper,
       registry,
@@ -224,7 +640,6 @@ describe("ResearchWorkflow (LangGraph StateGraph)", () => {
     const analystModule = createAnalystModule({ llm });
 
     const workflow = createResearchWorkflow({
-      llm,
       search,
       scraper,
       registry,
@@ -280,11 +695,11 @@ describe("ResearchWorkflow (LangGraph StateGraph)", () => {
 
     const benchmarkGuards: ResourceGuards = {
       ...guards,
+      maxQueriesPerResearch: 2,
       maxScrapePagesPerResearch: 1,
     };
 
     const workflow = createResearchWorkflow({
-      llm,
       search,
       scraper,
       registry,

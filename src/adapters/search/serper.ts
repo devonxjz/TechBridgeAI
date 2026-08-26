@@ -35,6 +35,7 @@ export class SerperSearchAdapter implements SearchAdapter {
         gl: options?.region ?? "vn",
         hl: options?.language ?? "vi",
       }),
+      signal: options?.signal,
     });
 
     if (!response.ok) {

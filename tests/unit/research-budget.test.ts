@@ -13,6 +13,21 @@ describe("ResearchBudget", () => {
     expect(() => budget.claimModelCall(60)).toThrow("Research token budget exceeded");
   });
 
+  it("reconciles actual model usage before admitting the next call", () => {
+    const budget = createResearchBudget({ maxLLMCalls: 3, maxTokens: 100 });
+
+    budget.claimModelCall(10);
+    budget.recordModelUsage({
+      model: "test-model",
+      promptTokens: 90,
+      completionTokens: 5,
+      totalTokens: 95,
+      timestamp: new Date(),
+    });
+
+    expect(() => budget.claimModelCall(10)).toThrow("Research token budget exceeded");
+  });
+
   it("rejects before a model call exceeds the call budget", () => {
     const budget = createResearchBudget({
       maxLLMCalls: 2,
@@ -52,5 +67,22 @@ describe("ResearchBudget", () => {
     await Promise.all([p1, p2, p3]);
 
     expect(maxConcurrent).toBe(2);
+  });
+
+  it("maintains an independent concurrency limit for each provider", async () => {
+    const budget = createResearchBudget({ maxConcurrentProviderCalls: 1 });
+    let activeCalls = 0;
+    let maxActiveCalls = 0;
+    const task = (provider: "search" | "scraper") =>
+      budget.runWithProviderSlot(provider, async () => {
+        activeCalls++;
+        maxActiveCalls = Math.max(maxActiveCalls, activeCalls);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        activeCalls--;
+      });
+
+    await Promise.all([task("search"), task("scraper")]);
+
+    expect(maxActiveCalls).toBe(2);
   });
 });

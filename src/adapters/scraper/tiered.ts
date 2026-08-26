@@ -4,6 +4,7 @@
 
 import {
   ScrapeError,
+  type ScrapeOptions,
   type ScraperAdapter,
   type ScrapedContent,
   type ScraperProvider,
@@ -18,7 +19,7 @@ export interface ScrapeAttempt {
 export class TieredScraperAdapter implements ScraperAdapter {
   constructor(private readonly tiers: readonly ScraperAdapter[]) {}
 
-  async extract(url: string): Promise<ScrapedContent> {
+  async extract(url: string, options?: ScrapeOptions): Promise<ScrapedContent> {
     let targetHost = "unknown";
     try {
       targetHost = new URL(url).hostname;
@@ -31,7 +32,7 @@ export class TieredScraperAdapter implements ScraperAdapter {
     for (const tier of this.tiers) {
       const startTime = Date.now();
       try {
-        const content = await tier.extract(url);
+        const content = await tier.extract(url, options);
         const duration = Date.now() - startTime;
         const provider: ScraperProvider =
           (content.metadata?.provider as ScraperProvider) || "direct";
@@ -48,6 +49,9 @@ export class TieredScraperAdapter implements ScraperAdapter {
 
         return content;
       } catch (err: unknown) {
+        if (options?.signal?.aborted) {
+          throw err;
+        }
         const duration = Date.now() - startTime;
         const provider: ScraperProvider =
           err instanceof ScrapeError ? err.provider : "direct";

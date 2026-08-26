@@ -91,17 +91,21 @@ export class OpenAIAdapter implements LLMAdapter {
 
     options?.context?.budget?.claimModelCall(this.estimateTokens(messages));
 
-    const structuredModel = model.withStructuredOutput(schema);
-    const result = await structuredModel.invoke(messages, {
+    const structuredModel = model.withStructuredOutput(schema, {
+      includeRaw: true,
+    });
+    const result = (await structuredModel.invoke(messages, {
       signal: options?.context?.signal,
       callbacks: options?.context?.callbacks as Callbacks,
-    });
+    })) as { raw: BaseMessage; parsed: T | null };
 
-    // If structured output returned object with schema, log default usage if available
     const modelName = options?.model ?? DEFAULT_MODEL;
-    this.logUsage(result, modelName, options);
+    this.logUsage(result.raw, modelName, options);
+    if (result.parsed === null) {
+      throw new Error("Structured output parsing failed");
+    }
 
-    return result as T;
+    return result.parsed;
   }
 
   async *stream(

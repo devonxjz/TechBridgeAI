@@ -27,7 +27,10 @@ export class VietQrRegistryAdapter implements RegistryAdapter {
 
   constructor(private readonly timeoutMs = 5_000) {}
 
-  async findByTaxId(taxId: string): Promise<RegistryRecord | null> {
+  async findByTaxId(
+    taxId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<RegistryRecord | null> {
     const cleanTaxId = taxId.trim();
     if (!cleanTaxId) return null;
 
@@ -44,7 +47,9 @@ export class VietQrRegistryAdapter implements RegistryAdapter {
         headers: {
           Accept: "application/json",
         },
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: options?.signal
+          ? AbortSignal.any([options.signal, AbortSignal.timeout(this.timeoutMs)])
+          : AbortSignal.timeout(this.timeoutMs),
       });
 
       if (response.status === 404) {

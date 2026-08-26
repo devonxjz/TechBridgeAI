@@ -12,6 +12,7 @@ class FakeChatModel extends BaseChatModel {
   lastSignal?: AbortSignal;
   lastCallbacks?: unknown;
   responses: AIMessage[];
+  structuredParsedNull = false;
 
   constructor(responses: AIMessage[] = []) {
     super({});
@@ -38,14 +39,17 @@ class FakeChatModel extends BaseChatModel {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  override withStructuredOutput(schema: any): any {
+  override withStructuredOutput(schema: any, config?: { includeRaw?: boolean }): any {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return RunnableLambda.from(async (_input: any, options?: any) => {
       this.lastSignal = options?.signal;
       this.lastCallbacks = options?.callbacks;
       const msg = this.responses.shift();
       const text = msg ? (msg.content as string) : '{"name":"FPT"}';
-      return (schema as z.ZodSchema).parse(JSON.parse(text));
+      const parsed = this.structuredParsedNull
+        ? null
+        : (schema as z.ZodSchema).parse(JSON.parse(text));
+      return config?.includeRaw ? { raw: msg, parsed } : parsed;
     });
   }
 }
@@ -80,9 +84,39 @@ describe("LangChain-backed LLM Adapter", () => {
     const adapter = new OpenAIAdapter("test-key", {
       modelFactory: () => fakeModel as unknown as ChatOpenAI,
     });
+    let recordedTokens = 0;
 
-    const result = await adapter.completeStructured("extract company", schema);
+    const result = await adapter.completeStructured("extract company", schema, {
+      context: {
+        budget: {
+          claimModelCall: () => undefined,
+          recordModelUsage: (usage) => {
+            recordedTokens += usage.totalTokens;
+          },
+        },
+      },
+    });
     expect(result).toEqual({ name: "FPT" });
+    expect(adapter.getUsageLogs()[0].totalTokens).toBe(25);
+    expect(recordedTokens).toBe(25);
+  });
+
+  it("logs raw usage before rejecting an unparsed structured response", async () => {
+    const fakeModel = new FakeChatModel([
+      new AIMessage({
+        content: "invalid structured response",
+        usage_metadata: { input_tokens: 10, output_tokens: 4, total_tokens: 14 },
+      }),
+    ]);
+    fakeModel.structuredParsedNull = true;
+    const adapter = new OpenAIAdapter("test-key", {
+      modelFactory: () => fakeModel as unknown as ChatOpenAI,
+    });
+
+    await expect(
+      adapter.completeStructured("extract company", z.object({ name: z.string() })),
+    ).rejects.toThrow("Structured output parsing failed");
+    expect(adapter.getUsageLogs()[0].totalTokens).toBe(14);
   });
 
   it("forwards signal, callbacks, and claims budget", async () => {

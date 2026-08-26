@@ -20,7 +20,12 @@ import { createAnalystModule } from "@/modules/analyst";
 import { createResearchWorkflow } from "@/modules/workflow";
 import {
   createLangfuseCallback,
+  emitResearchScores,
   flushLangfuse,
+  traceResearch,
+  type ResearchTraceContext,
+  updateResearchObservationOutcome,
+  updateResearchTraceOutcome,
 } from "@/observability/langfuse";
 import { slugify, type SourceName } from "@/lib/types";
 
@@ -43,7 +48,6 @@ export async function POST(req: NextRequest) {
     const analyst = createAnalystModule({ llm });
 
     const workflow = createResearchWorkflow({
-      llm,
       search,
       scraper,
       registry,
@@ -57,7 +61,7 @@ export async function POST(req: NextRequest) {
     const researchRunId = crypto.randomUUID();
     const companyId = slugify(input.name);
 
-    const langfuseCallback = createLangfuseCallback({
+    const traceContext: ResearchTraceContext = {
       researchRunId,
       companyId,
       requestedSources: [
@@ -67,7 +71,8 @@ export async function POST(req: NextRequest) {
         "registry",
         ...(input.linkedinUrl ? ["linkedin" as SourceName] : []),
       ],
-    });
+    };
+    const langfuseCallback = createLangfuseCallback(traceContext);
 
     // Setup cancellation & 285s internal deadline
     const controller = new AbortController();
@@ -77,22 +82,48 @@ export async function POST(req: NextRequest) {
       controller.abort("Research deadline exceeded (285s)");
     }, 285_000);
 
-    (async () => {
+    void (async () => {
       try {
-        for await (const event of workflow.stream(input, {
-          researchRunId,
-          signal: controller.signal,
-          callbacks: langfuseCallback ? [langfuseCallback] : undefined,
-        })) {
-          writer.write(event);
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Internal workflow error";
-        writer.write({
-          event: "error",
-          data: { message },
-        } as StreamEvent);
-        writer.write({ event: "done", data: {} } as StreamEvent);
+        await traceResearch(traceContext, async (traceId) => {
+          try {
+            for await (const event of workflow.stream(input, {
+              researchRunId,
+              signal: controller.signal,
+              callbacks: langfuseCallback ? [langfuseCallback] : undefined,
+              onComplete: async (state) => {
+                updateResearchTraceOutcome(state);
+                await emitResearchScores(traceId, {
+                  sourceResults: state.sourceResults,
+                  hasProfile: Boolean(state.profile),
+                  hasAnalysis: Boolean(state.report),
+                  overallConfidence: state.profile?.overallConfidence ?? 0,
+                  outcome:
+                    state.outcome === "running" ? "failed" : state.outcome,
+                });
+              },
+            })) {
+              writer.write(event);
+            }
+          } catch (err) {
+            const message =
+              err instanceof Error ? err.message : "Internal workflow error";
+            updateResearchObservationOutcome(
+              controller.signal.aborted ? "cancelled" : "failed",
+            );
+            await emitResearchScores(traceId, {
+              sourceResults: [],
+              hasProfile: false,
+              hasAnalysis: false,
+              overallConfidence: 0,
+              outcome: "failed",
+            });
+            writer.write({
+              event: "error",
+              data: { message },
+            } as StreamEvent);
+            writer.write({ event: "done", data: {} } as StreamEvent);
+          }
+        });
       } finally {
         clearTimeout(deadlineTimeout);
         req.signal.removeEventListener("abort", onReqAbort);

@@ -58,7 +58,11 @@ export default function HomePage() {
               </p>
             </div>
 
-            <ResearchForm onSubmit={research} isLoading={isLoading} />
+            <ResearchForm
+              onSubmit={research}
+              isLoading={isLoading}
+              initialInput={state.input}
+            />
 
             {/* Feature highlights */}
             <div className="grid grid-cols-3 gap-3 pt-4">
@@ -84,7 +88,11 @@ export default function HomePage() {
           <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-6">
             {/* Left panel: form + progress */}
             <div className="space-y-4">
-              <ResearchForm onSubmit={research} isLoading={isLoading} />
+              <ResearchForm
+                onSubmit={research}
+                isLoading={isLoading}
+                initialInput={state.input}
+              />
               <ResearchProgress
                 sourceStatuses={state.sourceStatuses}
                 findings={state.findings}
@@ -100,7 +108,7 @@ export default function HomePage() {
             </div>
 
             {/* Right panel: profile */}
-            <div>
+            <div className="min-w-0">
               {state.profile ? (
                 <ProfileCard
                   profile={state.profile}

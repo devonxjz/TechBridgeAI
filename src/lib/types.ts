@@ -185,18 +185,6 @@ export interface AnalysisContext {
   sponsorCriteria?: string;
 }
 
-// ─── Research Events (streaming) ───
-
-export type ResearchEvent =
-  | {
-      type: "progress";
-      source: SourceName;
-      status: "started" | "done" | "failed";
-    }
-  | { type: "finding"; finding: RawFinding }
-  | { type: "complete"; findings: RawFinding[] }
-  | { type: "error"; source: SourceName; error: string };
-
 // ─── SSE Stream Events ───
 
 export type StreamEvent =
@@ -225,10 +213,6 @@ export interface SourceError {
   retryable: boolean;
 }
 
-export type SourceResult =
-  | { ok: true; findings: RawFinding[] }
-  | { ok: false; error: SourceError };
-
 export type SourceExecutionStatus = "succeeded" | "failed" | "skipped";
 export type ResearchOutcome = "running" | "complete" | "partial" | "failed";
 
@@ -246,4 +230,3 @@ export interface PreparedEvidence {
   sourceCoverage: number;
   outcome: Exclude<ResearchOutcome, "running">;
 }
-

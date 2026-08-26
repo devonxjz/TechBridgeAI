@@ -11,7 +11,11 @@ if (typeof globalThis !== "undefined" && typeof globalThis.WebSocket === "undefi
 
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import type { CompanyProfile, ProfileDiff } from "@/lib/types";
-import type { StorageAdapter } from "./types";
+import type {
+  StorageAdapter,
+  StorageReadOptions,
+  StorageWriteOptions,
+} from "./types";
 
 export class SupabaseStorageAdapter implements StorageAdapter {
   private client: SupabaseClient;
@@ -32,8 +36,11 @@ export class SupabaseStorageAdapter implements StorageAdapter {
     });
   }
 
-  async saveProfile(profile: CompanyProfile): Promise<void> {
-    const { error } = await this.client
+  async saveProfile(
+    profile: CompanyProfile,
+    options?: StorageWriteOptions,
+  ): Promise<void> {
+    const query = this.client
       .from("company_profiles")
       .upsert(
         {
@@ -43,8 +50,10 @@ export class SupabaseStorageAdapter implements StorageAdapter {
           data: profile,
           updated_at: new Date().toISOString(),
         },
-        { onConflict: "id,version" }
+        { onConflict: "id,version" },
       );
+    if (options?.signal) query.abortSignal(options.signal);
+    const { error } = await query;
 
     if (error) {
       throw new Error(`Failed to save profile to Supabase: ${error.message}`);
@@ -73,14 +82,18 @@ export class SupabaseStorageAdapter implements StorageAdapter {
     return this.getLatestProfile(companyId);
   }
 
-  async getLatestProfile(companyId: string): Promise<CompanyProfile | null> {
-    const { data, error } = await this.client
+  async getLatestProfile(
+    companyId: string,
+    options?: StorageReadOptions,
+  ): Promise<CompanyProfile | null> {
+    const query = this.client
       .from("company_profiles")
       .select("data")
       .eq("id", companyId)
       .order("version", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(1);
+    if (options?.signal) query.abortSignal(options.signal);
+    const { data, error } = await query.maybeSingle();
 
     if (error) {
       throw new Error(`Failed to get latest profile from Supabase: ${error.message}`);
@@ -118,9 +131,12 @@ export class SupabaseStorageAdapter implements StorageAdapter {
     return profiles;
   }
 
-  async saveDiff(diff: ProfileDiff): Promise<void> {
+  async saveDiff(
+    diff: ProfileDiff,
+    options?: StorageWriteOptions,
+  ): Promise<void> {
     const diffId = `${diff.companyId}_${diff.fromVersion}_${diff.toVersion}`;
-    const { error } = await this.client
+    const query = this.client
       .from("company_diffs")
       .upsert(
         {
@@ -131,8 +147,10 @@ export class SupabaseStorageAdapter implements StorageAdapter {
           data: diff,
           created_at: new Date().toISOString(),
         },
-        { onConflict: "id" }
+        { onConflict: "id" },
       );
+    if (options?.signal) query.abortSignal(options.signal);
+    const { error } = await query;
 
     if (error) {
       throw new Error(`Failed to save diff to Supabase: ${error.message}`);

@@ -14,14 +14,15 @@ import type {
   ProfileDiff,
   FieldChange,
 } from "@/lib/types";
-import type { LLMAdapter } from "@/adapters/llm/types";
+import type { LLMAdapter, LLMInvocationContext } from "@/adapters/llm/types";
 
 export interface ProfileModule {
   buildProfile(
     findings: RawFinding[],
     input: CompanyInput,
     existingId?: string,
-    existingVersion?: number
+    existingVersion?: number,
+    llmContext?: LLMInvocationContext,
   ): Promise<CompanyProfile>;
   diffProfiles(
     current: CompanyProfile,
@@ -80,7 +81,7 @@ type LLMProfileOutput = z.infer<typeof LLMProfileSchema>;
 
 export function createProfileModule(deps: ProfileDeps): ProfileModule {
   return {
-    async buildProfile(findings, input, existingId, existingVersion) {
+    async buildProfile(findings, input, existingId, existingVersion, llmContext) {
       const prompt = buildProfilePrompt(findings, input);
 
       const llmOutput = await deps.llm.completeStructured<LLMProfileOutput>(
@@ -89,6 +90,7 @@ export function createProfileModule(deps: ProfileDeps): ProfileModule {
         {
           systemPrompt: SYSTEM_PROMPT,
           temperature: 0.2,
+          context: llmContext,
         }
       );
 

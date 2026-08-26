@@ -15,7 +15,7 @@ import type {
   StreamEvent,
 } from "@/lib/types";
 import { slugify } from "@/lib/types";
-import type { LLMAdapter } from "@/adapters/llm/types";
+import type { LLMInvocationContext } from "@/adapters/llm/types";
 import type { SearchAdapter } from "@/adapters/search/types";
 import type { ScraperAdapter } from "@/adapters/scraper/types";
 import type { RegistryAdapter } from "@/adapters/registry/types";
@@ -24,22 +24,32 @@ import type { ResourceGuards } from "@/config";
 import type { ProfileModule } from "@/modules/profile";
 import type { AnalystModule } from "@/modules/analyst";
 import { prepareEvidence } from "@/modules/research/evidence";
-import { createResearchBudget, type ResearchBudget } from "@/modules/research/budget";
+import {
+  createResearchBudget,
+  ResearchQueryBudgetExceededError,
+  type ResearchBudget,
+} from "@/modules/research/budget";
 import { createResearchSourceRunners, type ResearchSourceRunner } from "@/modules/research";
+import {
+  observeResearchStep,
+  updateResearchObservationOutcome,
+} from "@/observability/langfuse";
 import {
   ResearchWorkflowAnnotation,
   type ResearchWorkflowState,
 } from "./state";
+
+const SSE_EVENT_NAME = "sse_event";
 
 export interface ResearchWorkflowOptions {
   researchRunId: string;
   signal?: AbortSignal;
   callbacks?: readonly unknown[];
   sessionId?: string;
+  onComplete?: (state: ResearchWorkflowState) => void | Promise<void>;
 }
 
 export interface ResearchWorkflowDeps {
-  llm: LLMAdapter;
   search: SearchAdapter;
   scraper: ScraperAdapter;
   registry: RegistryAdapter;
@@ -62,7 +72,6 @@ export interface ResearchWorkflow {
 
 export function createResearchWorkflow(deps: ResearchWorkflowDeps): ResearchWorkflow {
   const runners = createResearchSourceRunners({
-    llm: deps.llm,
     search: deps.search,
     scraper: deps.scraper,
     registry: deps.registry,
@@ -75,12 +84,6 @@ export function createResearchWorkflow(deps: ResearchWorkflowDeps): ResearchWork
     },
 
     async *stream(input, options) {
-      const budget = createResearchBudget({
-        maxLLMCalls: deps.guards.maxLLMCallsPerResearch,
-        maxTokens: deps.guards.maxTokensPerResearch,
-        maxConcurrentProviderCalls: deps.guards.maxConcurrentProviderCalls,
-      });
-
       const activeSources: SourceName[] = ["web_search", "website", "news", "registry"];
       if (input.linkedinUrl) {
         activeSources.push("linkedin");
@@ -91,22 +94,10 @@ export function createResearchWorkflow(deps: ResearchWorkflowDeps): ResearchWork
         data: { sources: activeSources },
       } as StreamEvent;
 
-      const graph = buildGraph(deps, runners, budget, options.signal);
-      const app = graph.compile();
+      const app = compileResearchGraph(deps, runners, options);
 
       const eventStream = app.streamEvents(
-        {
-          researchRunId: options.researchRunId,
-          input,
-          sourceResults: [],
-          findings: [],
-          existingProfile: null,
-          profile: null,
-          diff: null,
-          report: null,
-          outcome: "running",
-          fatalError: null,
-        },
+        createInitialState(input, options.researchRunId),
         {
           version: "v2",
           signal: options.signal,
@@ -117,9 +108,16 @@ export function createResearchWorkflow(deps: ResearchWorkflowDeps): ResearchWork
 
       let fatalErrorEncountered: string | null = null;
       let hasFindings = false;
+      let finalState: ResearchWorkflowState | null = null;
 
       for await (const event of eventStream) {
-        if (event.event === "on_custom_event" && event.name === "sse_event") {
+        if (event.event === "on_chain_end") {
+          const output = (event.data as { output?: unknown }).output;
+          if (isResearchWorkflowState(output)) {
+            finalState = output;
+          }
+        }
+        if (event.event === "on_custom_event" && event.name === SSE_EVENT_NAME) {
           const sse = event.data as StreamEvent;
           if (sse.event === "research:finding") {
             hasFindings = true;
@@ -129,6 +127,10 @@ export function createResearchWorkflow(deps: ResearchWorkflowDeps): ResearchWork
           }
           yield sse;
         }
+      }
+
+      if (finalState) {
+        await options.onComplete?.(finalState);
       }
 
       if (!hasFindings && !fatalErrorEncountered) {
@@ -149,27 +151,10 @@ async function executeGraph(
   deps: ResearchWorkflowDeps,
   runners: Record<SourceName, ResearchSourceRunner>
 ): Promise<ResearchWorkflowState> {
-  const budget = createResearchBudget({
-    maxLLMCalls: deps.guards.maxLLMCallsPerResearch,
-    maxTokens: deps.guards.maxTokensPerResearch,
-    maxConcurrentProviderCalls: deps.guards.maxConcurrentProviderCalls,
-  });
-  const graph = buildGraph(deps, runners, budget, options.signal);
-  const app = graph.compile();
+  const app = compileResearchGraph(deps, runners, options);
 
   return (await app.invoke(
-    {
-      researchRunId: options.researchRunId,
-      input,
-      sourceResults: [],
-      findings: [],
-      existingProfile: null,
-      profile: null,
-      diff: null,
-      report: null,
-      outcome: "running",
-      fatalError: null,
-    },
+    createInitialState(input, options.researchRunId),
     {
       signal: options.signal,
       callbacks: options.callbacks as Callbacks,
@@ -178,43 +163,103 @@ async function executeGraph(
   )) as ResearchWorkflowState;
 }
 
+function compileResearchGraph(
+  deps: ResearchWorkflowDeps,
+  runners: Record<SourceName, ResearchSourceRunner>,
+  options: ResearchWorkflowOptions,
+) {
+  const budget = createResearchBudget({
+    maxLLMCalls: deps.guards.maxLLMCallsPerResearch,
+    maxTokens: deps.guards.maxTokensPerResearch,
+    maxQueries: deps.guards.maxQueriesPerResearch,
+    maxConcurrentProviderCalls: deps.guards.maxConcurrentProviderCalls,
+  });
+  return buildGraph(deps, runners, budget, options).compile();
+}
+
+function createInitialState(
+  input: CompanyInput,
+  researchRunId: string,
+): ResearchWorkflowState {
+  return {
+    researchRunId,
+    input,
+    sourceResults: [],
+    findings: [],
+    existingProfile: null,
+    profile: null,
+    diff: null,
+    report: null,
+    outcome: "running",
+    fatalError: null,
+  };
+}
+
 function buildGraph(
   deps: ResearchWorkflowDeps,
   runners: Record<SourceName, ResearchSourceRunner>,
   budget: ResearchBudget,
-  signal?: AbortSignal
+  options: ResearchWorkflowOptions,
 ) {
+  const { signal } = options;
+  const llmContext: LLMInvocationContext = {
+    signal,
+    callbacks: options.callbacks,
+    budget,
+  };
   // Source Nodes
   const createSourceNode = (source: SourceName) => {
-    return async (state: typeof ResearchWorkflowAnnotation.State) => {
-      if (source === "linkedin" && !state.input.linkedinUrl) {
-        return {
-          sourceResults: [
-            {
-              source: "linkedin" as SourceName,
-              status: "skipped" as const,
-              findings: [],
-              attempts: 0,
-              durationMs: 0,
-            },
-          ],
-        };
-      }
+    return async (state: typeof ResearchWorkflowAnnotation.State) =>
+      observeResearchStep(`source.${source}`, async () => {
+        if (source === "linkedin" && !state.input.linkedinUrl) {
+          return {
+            sourceResults: [
+              {
+                source: "linkedin" as SourceName,
+                status: "skipped" as const,
+                findings: [],
+                attempts: 0,
+                durationMs: 0,
+              },
+            ],
+          };
+        }
 
-      const runner = runners[source];
-      const result = await executeSourceRunner(
-        source,
-        runner,
-        state.input,
-        budget,
-        deps.guards,
-        signal
-      );
-      return {
-        sourceResults: [result],
-      };
-    };
+        const runner = runners[source];
+        const result = await executeSourceRunner(
+          source,
+          runner,
+          state.input,
+          budget,
+          deps.guards,
+          signal,
+        );
+        if (result.status === "failed") {
+          updateResearchObservationOutcome("failed");
+        }
+        return {
+          sourceResults: [result],
+        };
+      });
   };
+
+  const tracedNode = <T,>(
+    name: string,
+    node: (state: typeof ResearchWorkflowAnnotation.State) => Promise<T>,
+  ) =>
+    (state: typeof ResearchWorkflowAnnotation.State) =>
+      observeResearchStep(name, async () => {
+        const result = await node(state);
+        if (result && typeof result === "object") {
+          const update = result as { fatalError?: unknown; outcome?: unknown };
+          if (update.fatalError || update.outcome === "failed") {
+            updateResearchObservationOutcome("failed");
+          } else if (update.outcome === "partial") {
+            updateResearchObservationOutcome("partial");
+          }
+        }
+        return result;
+      });
 
   return new StateGraph(ResearchWorkflowAnnotation)
     .addNode("web_search", createSourceNode("web_search"))
@@ -222,7 +267,7 @@ function buildGraph(
     .addNode("news", createSourceNode("news"))
     .addNode("registry", createSourceNode("registry"))
     .addNode("linkedin", createSourceNode("linkedin"))
-    .addNode("prepare_evidence", async (state) => {
+    .addNode("prepare_evidence", tracedNode("evidence.prepare", async (state) => {
       const prepared = prepareEvidence(state.sourceResults);
       if (prepared.findings.length === 0) {
         const errorDetails = state.sourceResults
@@ -232,7 +277,7 @@ function buildGraph(
           errorDetails.length > 0 ? ` Chi tiết: ${errorDetails.join(" | ")}` : "";
         const message = `Không tìm thấy thông tin nào về công ty này.${detailStr}`;
 
-        await dispatchCustomEvent("sse_event", {
+        await dispatchCustomEvent(SSE_EVENT_NAME, {
           event: "error",
           data: { message },
         } as StreamEvent);
@@ -247,21 +292,27 @@ function buildGraph(
         findings: prepared.findings,
         outcome: prepared.outcome,
       };
-    })
-    .addNode("load_existing_profile", async (state) => {
+    }))
+    .addNode("load_existing_profile", tracedNode("profile.load", async (state) => {
       if (state.fatalError) return {};
       const companyId = slugify(state.input.name);
       try {
-        const existing = await deps.storage.getLatestProfile(companyId);
+        const existing = await deps.storage.getLatestProfile(companyId, { signal });
         return { existingProfile: existing };
-      } catch {
-        return { existingProfile: null };
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to load existing profile";
+        await dispatchCustomEvent(SSE_EVENT_NAME, {
+          event: "error",
+          data: { message },
+        } as StreamEvent);
+        return { fatalError: message, outcome: "failed" as const };
       }
-    })
-    .addNode("build_profile", async (state) => {
+    }))
+    .addNode("build_profile", tracedNode("profile.build", async (state) => {
       if (state.fatalError || state.findings.length === 0) return {};
 
-      await dispatchCustomEvent("sse_event", {
+      await dispatchCustomEvent(SSE_EVENT_NAME, {
         event: "profile:building",
         data: { message: "Đang tổng hợp hồ sơ công ty..." },
       } as StreamEvent);
@@ -272,72 +323,80 @@ function buildGraph(
           state.findings,
           state.input,
           state.existingProfile?.id ?? companyId,
-          state.existingProfile?.version
+          state.existingProfile?.version,
+          llmContext,
         );
-
-        await dispatchCustomEvent("sse_event", {
-          event: "profile:ready",
-          data: { profile },
-        } as StreamEvent);
 
         return { profile };
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to build profile";
-        await dispatchCustomEvent("sse_event", {
+        await dispatchCustomEvent(SSE_EVENT_NAME, {
           event: "error",
           data: { message },
         } as StreamEvent);
         return { fatalError: message, outcome: "failed" as const };
       }
-    })
-    .addNode("persist_profile", async (state) => {
+    }))
+    .addNode("persist_profile", tracedNode("profile.persist", async (state) => {
       if (state.fatalError || !state.profile || signal?.aborted) return {};
       try {
-        await deps.storage.saveProfile(state.profile);
+        await deps.storage.saveProfile(state.profile, { signal });
+        await dispatchCustomEvent(SSE_EVENT_NAME, {
+          event: "profile:ready",
+          data: { profile: state.profile },
+        } as StreamEvent);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to persist profile";
-        return { fatalError: message };
+        await dispatchCustomEvent(SSE_EVENT_NAME, {
+          event: "error",
+          data: { message },
+        } as StreamEvent);
+        return { fatalError: message, outcome: "failed" as const };
       }
       return {};
-    })
-    .addNode("build_and_persist_diff", async (state) => {
+    }))
+    .addNode("build_and_persist_diff", tracedNode("profile.diff", async (state) => {
       if (state.fatalError || !state.profile) return {};
 
       if (state.existingProfile) {
         try {
           const diff = deps.profile.diffProfiles(state.profile, state.existingProfile);
           if (!signal?.aborted) {
-            await deps.storage.saveDiff(diff);
+            await deps.storage.saveDiff(diff, { signal });
           }
-          await dispatchCustomEvent("sse_event", {
+          await dispatchCustomEvent(SSE_EVENT_NAME, {
             event: "diff:ready",
             data: { diff },
           } as StreamEvent);
           return { diff };
-        } catch {
-          await dispatchCustomEvent("sse_event", {
-            event: "diff:ready",
-            data: { diff: null },
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : "Failed to persist profile diff";
+          await dispatchCustomEvent(SSE_EVENT_NAME, {
+            event: "error",
+            data: { message },
           } as StreamEvent);
-          return { diff: null };
+          return { fatalError: message, outcome: "failed" as const };
         }
       } else {
-        await dispatchCustomEvent("sse_event", {
+        await dispatchCustomEvent(SSE_EVENT_NAME, {
           event: "diff:ready",
           data: { diff: null },
         } as StreamEvent);
         return { diff: null };
       }
-    })
-    .addNode("analyze", async (state) => {
+    }))
+    .addNode("analyze", tracedNode("analyst.analyze", async (state) => {
       if (state.fatalError || !state.profile) return {};
 
       try {
-        const report = await deps.analyst.analyze(state.profile, {
-          previousProfile: state.existingProfile ?? undefined,
-        });
+        const report = await deps.analyst.analyze(
+          state.profile,
+          { previousProfile: state.existingProfile ?? undefined },
+          llmContext,
+        );
 
-        await dispatchCustomEvent("sse_event", {
+        await dispatchCustomEvent(SSE_EVENT_NAME, {
           event: "analysis:ready",
           data: { report },
         } as StreamEvent);
@@ -345,13 +404,13 @@ function buildGraph(
         return { report };
       } catch (err) {
         const message = err instanceof Error ? err.message : "Không thể phân tích hồ sơ.";
-        await dispatchCustomEvent("sse_event", {
+        await dispatchCustomEvent(SSE_EVENT_NAME, {
           event: "error",
           data: { message },
         } as StreamEvent);
         return { outcome: "partial" as const };
       }
-    })
+    }))
     .addEdge(START, "web_search")
     .addEdge(START, "website")
     .addEdge(START, "news")
@@ -396,7 +455,7 @@ async function executeSourceRunner(
     };
   }
 
-  await dispatchCustomEvent("sse_event", {
+  await dispatchCustomEvent(SSE_EVENT_NAME, {
     event: "research:progress",
     data: { source, status: "started" },
   } as StreamEvent);
@@ -405,34 +464,24 @@ async function executeSourceRunner(
   const maxRetries = guards.maxRetriesPerSource ?? 2;
   let lastError: SourceError | undefined;
 
-  const providerType: "search" | "scraper" | "registry" =
-    source === "registry"
-      ? "registry"
-      : source === "website" || source === "linkedin"
-      ? "scraper"
-      : "search";
-
   while (attempts <= maxRetries) {
     attempts++;
+    const timeoutSignal = AbortSignal.timeout(guards.sourceTimeoutMs);
+    const attemptSignal = signal
+      ? AbortSignal.any([signal, timeoutSignal])
+      : timeoutSignal;
     try {
       if (signal?.aborted) {
         throw new Error("Execution aborted");
       }
 
-      const findings = await budget.runWithProviderSlot(providerType, async () => {
-        return await Promise.race([
-          runner(input),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(new Error(`Source ${source} timed out after ${guards.sourceTimeoutMs}ms`)),
-              guards.sourceTimeoutMs
-            )
-          ),
-        ]);
-      });
+      const findings = await runWithAbortSignal(
+        runner(input, { budget, signal: attemptSignal }),
+        attemptSignal,
+      );
 
       for (const finding of findings) {
-        await dispatchCustomEvent("sse_event", {
+        await dispatchCustomEvent(SSE_EVENT_NAME, {
           event: "research:finding",
           data: {
             source: finding.source,
@@ -441,7 +490,7 @@ async function executeSourceRunner(
         } as StreamEvent);
       }
 
-      await dispatchCustomEvent("sse_event", {
+      await dispatchCustomEvent(SSE_EVENT_NAME, {
         event: "research:progress",
         data: { source, status: "done" },
       } as StreamEvent);
@@ -454,10 +503,23 @@ async function executeSourceRunner(
         durationMs: Date.now() - startTime,
       };
     } catch (err) {
+      if (err instanceof ResearchQueryBudgetExceededError) {
+        await dispatchCustomEvent(SSE_EVENT_NAME, {
+          event: "research:progress",
+          data: { source, status: "done" },
+        } as StreamEvent);
+        return {
+          source,
+          status: "skipped",
+          findings: [],
+          attempts,
+          durationMs: Date.now() - startTime,
+        };
+      }
       const message = err instanceof Error ? err.message : String(err);
-      const isTimeout = message.includes("timed out");
+      const isTimeout = timeoutSignal.aborted || message.includes("timed out");
       const retryable =
-        (isTimeout || message.includes("50") || message.includes("429")) &&
+        isRetryableSourceError(err, isTimeout, signal) &&
         attempts <= maxRetries;
 
       lastError = {
@@ -473,12 +535,12 @@ async function executeSourceRunner(
     }
   }
 
-  await dispatchCustomEvent("sse_event", {
+  await dispatchCustomEvent(SSE_EVENT_NAME, {
     event: "error",
     data: { message: lastError?.message ?? "Source execution failed", source },
   } as StreamEvent);
 
-  await dispatchCustomEvent("sse_event", {
+  await dispatchCustomEvent(SSE_EVENT_NAME, {
     event: "research:progress",
     data: { source, status: "failed" },
   } as StreamEvent);
@@ -491,4 +553,62 @@ async function executeSourceRunner(
     attempts,
     durationMs: Date.now() - startTime,
   };
+}
+
+function isRetryableSourceError(
+  error: unknown,
+  isTimeout: boolean,
+  signal?: AbortSignal,
+): boolean {
+  if (signal?.aborted) return false;
+  if (isTimeout) return true;
+  if (
+    error &&
+    typeof error === "object" &&
+    "retryable" in error &&
+    typeof error.retryable === "boolean"
+  ) {
+    return error.retryable;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    /(?:failed:|status(?: code)?|upstream error:)\s*(?:429|5\d{2})\b/i.test(message) ||
+    /\b(?:ECONNRESET|ETIMEDOUT|EAI_AGAIN)\b/i.test(message)
+  );
+}
+
+function runWithAbortSignal<T>(
+  task: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+
+    signal.addEventListener("abort", onAbort, { once: true });
+    task.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+function isResearchWorkflowState(value: unknown): value is ResearchWorkflowState {
+  if (!value || typeof value !== "object") return false;
+  const state = value as Partial<ResearchWorkflowState>;
+  return (
+    typeof state.researchRunId === "string" &&
+    Array.isArray(state.sourceResults) &&
+    Array.isArray(state.findings) &&
+    typeof state.outcome === "string"
+  );
 }

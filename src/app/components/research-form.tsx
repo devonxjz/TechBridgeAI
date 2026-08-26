@@ -6,13 +6,14 @@ import type { CompanyInput } from "@/lib/types";
 interface ResearchFormProps {
   onSubmit: (input: CompanyInput) => void;
   isLoading: boolean;
+  initialInput?: CompanyInput | null;
 }
 
-export function ResearchForm({ onSubmit, isLoading }: ResearchFormProps) {
-  const [name, setName] = useState("");
-  const [website, setWebsite] = useState("");
-  const [taxId, setTaxId] = useState("");
-  const [linkedinUrl, setLinkedinUrl] = useState("");
+export function ResearchForm({ onSubmit, isLoading, initialInput }: ResearchFormProps) {
+  const [name, setName] = useState(initialInput?.name ?? "");
+  const [website, setWebsite] = useState(initialInput?.website ?? "");
+  const [taxId, setTaxId] = useState(initialInput?.taxId ?? "");
+  const [linkedinUrl, setLinkedinUrl] = useState(initialInput?.linkedinUrl ?? "");
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
