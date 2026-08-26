@@ -471,6 +471,13 @@ async function executeLiveWorkflow({
         return;
       }
       updateResearchObservationOutcome("failed");
+      await emitResearchScores(traceId, {
+        sourceResults: [],
+        hasProfile: false,
+        hasAnalysis: false,
+        overallConfidence: 0,
+        outcome: "failed",
+      });
       throw err;
     }
   });
