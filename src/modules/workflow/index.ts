@@ -433,6 +433,7 @@ async function executeSourceRunner(
           data: {
             source: finding.source,
             summary: finding.content.slice(0, 200),
+            url: finding.url,
           },
         } as StreamEvent);
       }

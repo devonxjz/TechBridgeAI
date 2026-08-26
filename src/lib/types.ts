@@ -406,7 +406,7 @@ export type StreamEvent =
     }
   | {
       event: "research:finding";
-      data: { source: SourceName; summary: string };
+      data: { source: SourceName; summary: string; url?: string };
     }
   | { event: "profile:building"; data: { message: string } }
   | { event: "profile:ready"; data: { profile: CompanyProfile } }

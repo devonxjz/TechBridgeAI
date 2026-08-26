@@ -20,7 +20,7 @@ export interface ResearchState {
   status: "idle" | "researching" | "building" | "suggesting" | "done" | "error";
   input: CompanyInput | null;
   sourceStatuses: Record<SourceName, SourceStatus>;
-  findings: { source: SourceName; summary: string }[];
+  findings: { source: SourceName; summary: string; url?: string }[];
   profile: CompanyProfile | null;
   diff: ProfileDiff | null;
   report: AnalysisReport | null;
@@ -99,6 +99,7 @@ export function reduceResearchEvent(
           {
             source: event.data.source,
             summary: event.data.summary,
+            url: event.data.url,
           },
         ],
       };
