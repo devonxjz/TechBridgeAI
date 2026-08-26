@@ -29,10 +29,11 @@ describe("useResearch pure reducer - reduceResearchEvent", () => {
     companyId: "comp-1",
     fromVersion: 1,
     toVersion: 2,
-    generatedAt: new Date(),
+    summary: "Markets updated",
     changes: [
       {
         field: "markets",
+        changeType: "modified",
         oldValue: ["Việt Nam"],
         newValue: ["Việt Nam", "Mỹ"],
         significance: "medium",
