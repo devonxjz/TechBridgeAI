@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryStorageAdapter } from "@/adapters/storage/memory";
 
 const observabilityMocks = vi.hoisted(() => ({
   emitResearchScores: vi.fn(async () => undefined),
@@ -6,12 +7,14 @@ const observabilityMocks = vi.hoisted(() => ({
   updateResearchObservationOutcome: vi.fn(),
 }));
 
+let mockStorage = new MemoryStorageAdapter();
+
 vi.mock("@/config", () => ({
   createLLMAdapter: () => ({}),
   createSearchAdapter: () => ({}),
   createScraperAdapter: () => ({}),
   createRegistryAdapter: () => ({}),
-  createStorageAdapter: () => ({}),
+  createStorageAdapter: () => mockStorage,
   getGuards: () => ({}),
 }));
 vi.mock("@/modules/profile", () => ({ createProfileModule: () => ({}) }));
@@ -42,6 +45,7 @@ import { POST } from "@/app/api/research/route";
 describe("Research route observability", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockStorage = new MemoryStorageAdapter();
   });
 
   it("marks and scores an unexpected workflow failure", async () => {
@@ -49,7 +53,7 @@ describe("Research route observability", () => {
       new NextRequest("http://localhost:3000/api/research", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "FPT" }),
+        body: JSON.stringify({ input: { name: "FPT" } }),
       }),
     );
 

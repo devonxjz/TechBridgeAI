@@ -35,7 +35,7 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
     resetAdapters();
   });
 
-  it("handles full E2E research workflow with SSE stream and versioned updates", async () => {
+  it("handles full E2E research workflow with SSE stream, caching, and versioned updates", async () => {
     const storage = createStorageAdapter() as MemoryStorageAdapter;
     storage.clear();
 
@@ -79,13 +79,15 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
     llm.setResponse("Tổng hợp thông tin", JSON.stringify(v1MockProfile));
     llm.setResponse("Phân tích và đánh giá", JSON.stringify(mockAnalysisData));
 
-    // 2. Execute First API Request (Version 1)
+    // 2. Execute First API Request (Initial Miss -> Live Workflow -> Version 1 persisted)
     const req1 = new NextRequest("http://localhost:3000/api/research", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: "Vingroup",
-        website: "https://vingroup.net",
+        input: {
+          name: "Vingroup",
+          website: "https://vingroup.net",
+        },
       }),
     });
 
@@ -101,13 +103,21 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
     expect(text1).toContain("event: analysis:ready");
     expect(text1).toContain("event: done");
 
-    // Verify storage persistence
-    const savedV1 = await storage.getLatestProfile("vingroup");
-    expect(savedV1).not.toBeNull();
-    expect(savedV1?.version).toBe(1);
-    expect(savedV1?.officialName).toBe("Tập đoàn Vingroup");
+    // Find persisted company ID
+    const candidates = await storage.findIdentityCandidates({
+      taxId: null,
+      domain: "vingroup.net",
+      name: "vingroup",
+    });
+    expect(candidates.length).toBe(1);
+    const companyId = candidates[0].companyId;
 
-    // 3. Execute Second API Request (Version 2 - Updated data with diff)
+    const savedV1 = await storage.getLatestCompleteSnapshot(companyId);
+    expect(savedV1).not.toBeNull();
+    expect(savedV1?.profile.version).toBe(1);
+    expect(savedV1?.profile.officialName).toBe("Tập đoàn Vingroup");
+
+    // 3. Execute Second API Request with Refresh (Version 2 - Updated data with diff)
     const v2MockProfile = {
       ...v1MockProfile,
       markets: ["Việt Nam", "Mỹ", "Châu Âu"],
@@ -120,8 +130,14 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: "Vingroup",
-        website: "https://vingroup.net",
+        input: {
+          name: "Vingroup",
+          website: "https://vingroup.net",
+        },
+        cache: {
+          action: "refresh",
+          companyId,
+        },
       }),
     });
 
@@ -133,15 +149,34 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
     expect(text2).toContain("event: done");
 
     // Verify version 2 and diff persistence
-    const savedV2 = await storage.getLatestProfile("vingroup");
-    expect(savedV2?.version).toBe(2);
-    expect(savedV2?.markets).toContain("Mỹ");
+    const savedV2 = await storage.getLatestCompleteSnapshot(companyId);
+    expect(savedV2?.profile.version).toBe(2);
+    expect(savedV2?.profile.markets).toContain("Mỹ");
 
-    const diffs = await storage.getDiffs(savedV2!.id);
+    const diffs = await storage.getDiffs(companyId);
     expect(diffs.length).toBe(1);
     expect(diffs[0].fromVersion).toBe(1);
     expect(diffs[0].toVersion).toBe(2);
     expect(diffs[0].changes.some((c) => c.field === "markets")).toBe(true);
+
+    // 4. Execute Third API Request (Cache Hit - returns cached snapshot immediately)
+    const req3 = new NextRequest("http://localhost:3000/api/research", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        input: {
+          name: "Vingroup",
+          website: "https://vingroup.net",
+        },
+      }),
+    });
+
+    const response3 = await POST(req3);
+    expect(response3.status).toBe(200);
+    const text3 = await response3.text();
+    expect(text3).toContain("event: cache:hit");
+    expect(text3).toContain("event: profile:ready");
+    expect(text3).toContain("event: done");
   });
 
   it("rejects invalid request inputs with HTTP 400", async () => {
@@ -149,7 +184,9 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: "", // empty name
+        input: {
+          name: "", // empty name
+        },
       }),
     });
 
@@ -171,7 +208,9 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
       new NextRequest("http://localhost:3000/api/research", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "EDUZ", website: "https://eduz.vn" }),
+        body: JSON.stringify({
+          input: { name: "EDUZ", website: "https://eduz.vn" },
+        }),
       }),
     );
 
@@ -204,7 +243,9 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
     const req = new NextRequest("http://localhost:3000/api/research", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "FPT", website: "https://fpt.com.vn" }),
+      body: JSON.stringify({
+        input: { name: "FPT", website: "https://fpt.com.vn" },
+      }),
       signal: controller.signal,
     });
 
@@ -219,9 +260,15 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
     const text = await response.text();
     expect(text).toContain("event: research:start");
 
-    // Profile should not have been saved
-    const saved = await storage.getLatestProfile("fpt");
-    expect(saved).toBeNull();
+    // Profile / snapshot should not have been saved
+    const candidates = await storage.findIdentityCandidates({
+      taxId: null,
+      domain: "fpt.com.vn",
+      name: "fpt",
+    });
+    if (candidates.length > 0) {
+      const snapshot = await storage.getLatestCompleteSnapshot(candidates[0].companyId);
+      expect(snapshot).toBeNull();
+    }
   });
 });
-

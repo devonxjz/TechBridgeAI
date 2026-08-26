@@ -4,15 +4,17 @@
 
 import type { StreamEvent } from "@/lib/types";
 
+export interface SSEWriter {
+  write(event: StreamEvent): void;
+  close(): void;
+}
+
 /**
  * Create a ReadableStream that accepts StreamEvents and encodes them as SSE.
  */
 export function createSSEStream(): {
   stream: ReadableStream<Uint8Array>;
-  writer: {
-    write(event: StreamEvent): void;
-    close(): void;
-  };
+  writer: SSEWriter;
 } {
   const encoder = new TextEncoder();
   let controller: ReadableStreamDefaultController<Uint8Array>;

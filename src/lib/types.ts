@@ -203,10 +203,12 @@ export type ResearchRequest = z.infer<typeof ResearchRequestSchema>;
 export type ResearchErrorCode =
   | "identity_conflict"
   | "cache_invalid"
+  | "invalid_cache_selection"
+  | "cache_unavailable"
   | "persist_failed"
   | "research_failed";
 
-export type CacheHitMatchedBy = "tax_id" | "domain" | "selected";
+export type CacheHitMatchedBy = "tax_id" | "domain" | "selected" | "user_selection";
 
 export interface CacheSuggestion {
   companyId: string;

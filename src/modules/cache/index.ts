@@ -1,4 +1,13 @@
-import type { CompanyInput } from "@/lib/types";
+import type {
+  CompanyInput,
+  CacheSuggestion,
+  ResearchSnapshot,
+} from "@/lib/types";
+import type {
+  StorageAdapter,
+  StorageReadOptions,
+  StorageWriteOptions,
+} from "@/adapters/storage/types";
 
 const TAX_ID_PATTERN = /^\d{10}(?:\d{3})?$/;
 
@@ -20,6 +29,47 @@ export type CacheDecision =
   | { kind: "suggestions"; companyIds: string[] }
   | { kind: "miss" }
   | { kind: "conflict"; taxCompanyId: string; domainCompanyIds: string[] };
+
+export type CacheResolution =
+  | {
+      kind: "hit";
+      snapshot: ResearchSnapshot;
+      matchedBy: "tax_id" | "domain";
+    }
+  | { kind: "suggestions"; suggestions: CacheSuggestion[] }
+  | {
+      kind: "miss";
+      identity: NormalizedCompanyIdentity;
+      cacheInvalid: boolean;
+    }
+  | {
+      kind: "conflict";
+      taxCompanyId: string;
+      domainCompanyIds: string[];
+    };
+
+export interface ResearchCache {
+  lookup(input: CompanyInput, options?: StorageReadOptions): Promise<CacheResolution>;
+  select(
+    input: CompanyInput,
+    companyId: string,
+    options?: StorageReadOptions,
+  ): Promise<ResearchSnapshot>;
+  prepareRefresh(
+    input: CompanyInput,
+    companyId: string,
+    options?: StorageReadOptions,
+  ): Promise<ResearchSnapshot>;
+  resolveMiss(
+    input: CompanyInput,
+    options?: StorageWriteOptions,
+  ): Promise<{ companyId: string; identity: NormalizedCompanyIdentity }>;
+  persist(
+    identity: NormalizedCompanyIdentity,
+    snapshot: Omit<ResearchSnapshot, "lastSyncedAt">,
+    options?: StorageWriteOptions,
+  ): Promise<ResearchSnapshot>;
+}
 
 export class IdentityConflictError extends Error {
   readonly code = "identity_conflict";
@@ -156,4 +206,134 @@ export function decideCacheLookup(
 
   // 4. Miss
   return { kind: "miss" };
+}
+
+export function createResearchCache(storage: StorageAdapter): ResearchCache {
+  return {
+    async lookup(input: CompanyInput, options?: StorageReadOptions): Promise<CacheResolution> {
+      const identity = normalizeCompanyIdentity(input);
+      const candidates = await storage.findIdentityCandidates(identity, options);
+      const decision = decideCacheLookup(identity, candidates);
+
+      switch (decision.kind) {
+        case "hit": {
+          try {
+            const snapshot = await storage.getLatestCompleteSnapshot(decision.companyId, options);
+            if (!snapshot) {
+              return { kind: "miss", identity, cacheInvalid: false };
+            }
+            return {
+              kind: "hit",
+              snapshot,
+              matchedBy: decision.matchedBy,
+            };
+          } catch (err) {
+            if (err instanceof CacheInvalidError) {
+              return { kind: "miss", identity, cacheInvalid: true };
+            }
+            throw err;
+          }
+        }
+        case "suggestions": {
+          const suggestions: CacheSuggestion[] = [];
+          for (const id of decision.companyIds) {
+            try {
+              const snapshot = await storage.getLatestCompleteSnapshot(id, options);
+              if (snapshot) {
+                const candidate = candidates.find((c) => c.companyId === id);
+                suggestions.push({
+                  companyId: id,
+                  officialName: snapshot.profile.officialName,
+                  taxId: snapshot.profile.taxId ?? candidate?.taxId ?? undefined,
+                  domain: candidate?.domain ?? (snapshot.profile.website ? normalizeDomain(snapshot.profile.website) ?? undefined : undefined),
+                  lastSyncedAt: snapshot.lastSyncedAt,
+                });
+              }
+            } catch {
+              // Ignore corrupt candidates in suggestions
+            }
+          }
+          if (suggestions.length === 0) {
+            return { kind: "miss", identity, cacheInvalid: false };
+          }
+          return { kind: "suggestions", suggestions };
+        }
+        case "conflict": {
+          return {
+            kind: "conflict",
+            taxCompanyId: decision.taxCompanyId,
+            domainCompanyIds: decision.domainCompanyIds,
+          };
+        }
+        case "miss":
+        default: {
+          return { kind: "miss", identity, cacheInvalid: false };
+        }
+      }
+    },
+
+    async select(
+      input: CompanyInput,
+      companyId: string,
+      options?: StorageReadOptions
+    ): Promise<ResearchSnapshot> {
+      const resolution = await this.lookup(input, options);
+      if (
+        resolution.kind !== "suggestions" ||
+        !resolution.suggestions.some((s) => s.companyId === companyId)
+      ) {
+        throw new InvalidCacheSelectionError();
+      }
+
+      const snapshot = await storage.getLatestCompleteSnapshot(companyId, options);
+      if (!snapshot) {
+        throw new InvalidCacheSelectionError();
+      }
+      return snapshot;
+    },
+
+    async prepareRefresh(
+      input: CompanyInput,
+      companyId: string,
+      options?: StorageReadOptions
+    ): Promise<ResearchSnapshot> {
+      const identity = normalizeCompanyIdentity(input);
+      const candidates = await storage.findIdentityCandidates(identity, options);
+      const decision = decideCacheLookup(identity, candidates);
+
+      if (decision.kind === "conflict") {
+        throw new IdentityConflictError();
+      }
+      if (decision.kind === "hit" && decision.companyId !== companyId) {
+        throw new IdentityConflictError();
+      }
+      if (decision.kind === "suggestions" && !decision.companyIds.includes(companyId)) {
+        throw new IdentityConflictError();
+      }
+
+      const snapshot = await storage.getLatestCompleteSnapshot(companyId, options);
+      if (!snapshot) {
+        throw new IdentityConflictError("Không tìm thấy dữ liệu công ty để làm mới.");
+      }
+      return snapshot;
+    },
+
+    async resolveMiss(
+      input: CompanyInput,
+      options?: StorageWriteOptions
+    ): Promise<{ companyId: string; identity: NormalizedCompanyIdentity }> {
+      const identity = normalizeCompanyIdentity(input);
+      const candidateId = crypto.randomUUID();
+      const companyId = await storage.resolveOrCreateIdentity(identity, candidateId, options);
+      return { companyId, identity };
+    },
+
+    async persist(
+      identity: NormalizedCompanyIdentity,
+      snapshot: Omit<ResearchSnapshot, "lastSyncedAt">,
+      options?: StorageWriteOptions
+    ): Promise<ResearchSnapshot> {
+      return await storage.persistResearchSnapshot(identity, snapshot, options);
+    },
+  };
 }

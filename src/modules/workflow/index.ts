@@ -9,17 +9,16 @@ import { dispatchCustomEvent } from "@langchain/core/callbacks/dispatch";
 import type { Callbacks } from "@langchain/core/callbacks/manager";
 import type {
   CompanyInput,
+  CompanyProfile,
   SourceError,
   SourceExecutionResult,
   SourceName,
   StreamEvent,
 } from "@/lib/types";
-import { slugify } from "@/lib/types";
 import type { LLMInvocationContext } from "@/adapters/llm/types";
 import type { SearchAdapter } from "@/adapters/search/types";
 import type { ScraperAdapter } from "@/adapters/scraper/types";
 import type { RegistryAdapter } from "@/adapters/registry/types";
-import type { StorageAdapter } from "@/adapters/storage/types";
 import type { ResourceGuards } from "@/config";
 import type { ProfileModule } from "@/modules/profile";
 import type { AnalystModule } from "@/modules/analyst";
@@ -43,6 +42,8 @@ const SSE_EVENT_NAME = "sse_event";
 
 export interface ResearchWorkflowOptions {
   researchRunId: string;
+  companyId?: string;
+  existingProfile?: CompanyProfile | null;
   signal?: AbortSignal;
   callbacks?: readonly unknown[];
   sessionId?: string;
@@ -53,7 +54,6 @@ export interface ResearchWorkflowDeps {
   search: SearchAdapter;
   scraper: ScraperAdapter;
   registry: RegistryAdapter;
-  storage: StorageAdapter;
   profile: ProfileModule;
   analyst: AnalystModule;
   guards: ResourceGuards;
@@ -97,7 +97,7 @@ export function createResearchWorkflow(deps: ResearchWorkflowDeps): ResearchWork
       const app = compileResearchGraph(deps, runners, options);
 
       const eventStream = app.streamEvents(
-        createInitialState(input, options.researchRunId),
+        createInitialState(input, options),
         {
           version: "v2",
           signal: options.signal,
@@ -139,8 +139,6 @@ export function createResearchWorkflow(deps: ResearchWorkflowDeps): ResearchWork
           data: { message: "Không tìm thấy thông tin nào về công ty này." },
         } as StreamEvent;
       }
-
-      yield { event: "done", data: {} } as StreamEvent;
     },
   };
 }
@@ -154,7 +152,7 @@ async function executeGraph(
   const app = compileResearchGraph(deps, runners, options);
 
   return (await app.invoke(
-    createInitialState(input, options.researchRunId),
+    createInitialState(input, options),
     {
       signal: options.signal,
       callbacks: options.callbacks as Callbacks,
@@ -179,14 +177,14 @@ function compileResearchGraph(
 
 function createInitialState(
   input: CompanyInput,
-  researchRunId: string,
+  options: ResearchWorkflowOptions,
 ): ResearchWorkflowState {
   return {
-    researchRunId,
+    researchRunId: options.researchRunId,
     input,
     sourceResults: [],
     findings: [],
-    existingProfile: null,
+    existingProfile: options.existingProfile ?? null,
     profile: null,
     diff: null,
     report: null,
@@ -293,22 +291,6 @@ function buildGraph(
         outcome: prepared.outcome,
       };
     }))
-    .addNode("load_existing_profile", tracedNode("profile.load", async (state) => {
-      if (state.fatalError) return {};
-      const companyId = slugify(state.input.name);
-      try {
-        const existing = await deps.storage.getLatestProfile(companyId, { signal });
-        return { existingProfile: existing };
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Failed to load existing profile";
-        await dispatchCustomEvent(SSE_EVENT_NAME, {
-          event: "error",
-          data: { message },
-        } as StreamEvent);
-        return { fatalError: message, outcome: "failed" as const };
-      }
-    }))
     .addNode("build_profile", tracedNode("profile.build", async (state) => {
       if (state.fatalError || state.findings.length === 0) return {};
 
@@ -317,12 +299,13 @@ function buildGraph(
         data: { message: "Đang tổng hợp hồ sơ công ty..." },
       } as StreamEvent);
 
-      const companyId = slugify(state.input.name);
+      const targetCompanyId =
+        options.companyId || state.existingProfile?.id || options.researchRunId;
       try {
         const profile = await deps.profile.buildProfile(
           state.findings,
           state.input,
-          state.existingProfile?.id ?? companyId,
+          targetCompanyId,
           state.existingProfile?.version,
           llmContext,
         );
@@ -337,41 +320,16 @@ function buildGraph(
         return { fatalError: message, outcome: "failed" as const };
       }
     }))
-    .addNode("persist_profile", tracedNode("profile.persist", async (state) => {
-      if (state.fatalError || !state.profile || signal?.aborted) return {};
-      try {
-        await deps.storage.saveProfile(state.profile, { signal });
-        await dispatchCustomEvent(SSE_EVENT_NAME, {
-          event: "profile:ready",
-          data: { profile: state.profile },
-        } as StreamEvent);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to persist profile";
-        await dispatchCustomEvent(SSE_EVENT_NAME, {
-          event: "error",
-          data: { message },
-        } as StreamEvent);
-        return { fatalError: message, outcome: "failed" as const };
-      }
-      return {};
-    }))
-    .addNode("build_and_persist_diff", tracedNode("profile.diff", async (state) => {
+    .addNode("build_diff", tracedNode("profile.diff", async (state) => {
       if (state.fatalError || !state.profile) return {};
 
       if (state.existingProfile) {
         try {
           const diff = deps.profile.diffProfiles(state.profile, state.existingProfile);
-          if (!signal?.aborted) {
-            await deps.storage.saveDiff(diff, { signal });
-          }
-          await dispatchCustomEvent(SSE_EVENT_NAME, {
-            event: "diff:ready",
-            data: { diff },
-          } as StreamEvent);
           return { diff };
         } catch (err) {
           const message =
-            err instanceof Error ? err.message : "Failed to persist profile diff";
+            err instanceof Error ? err.message : "Failed to build profile diff";
           await dispatchCustomEvent(SSE_EVENT_NAME, {
             event: "error",
             data: { message },
@@ -379,10 +337,6 @@ function buildGraph(
           return { fatalError: message, outcome: "failed" as const };
         }
       } else {
-        await dispatchCustomEvent(SSE_EVENT_NAME, {
-          event: "diff:ready",
-          data: { diff: null },
-        } as StreamEvent);
         return { diff: null };
       }
     }))
@@ -395,11 +349,6 @@ function buildGraph(
           { previousProfile: state.existingProfile ?? undefined },
           llmContext,
         );
-
-        await dispatchCustomEvent(SSE_EVENT_NAME, {
-          event: "analysis:ready",
-          data: { report },
-        } as StreamEvent);
 
         return { report };
       } catch (err) {
@@ -421,11 +370,9 @@ function buildGraph(
     .addEdge("news", "prepare_evidence")
     .addEdge("registry", "prepare_evidence")
     .addEdge("linkedin", "prepare_evidence")
-    .addEdge("prepare_evidence", "load_existing_profile")
-    .addEdge("load_existing_profile", "build_profile")
-    .addEdge("build_profile", "persist_profile")
-    .addEdge("persist_profile", "build_and_persist_diff")
-    .addEdge("build_and_persist_diff", "analyze")
+    .addEdge("prepare_evidence", "build_profile")
+    .addEdge("build_profile", "build_diff")
+    .addEdge("build_diff", "analyze")
     .addEdge("analyze", END);
 }
 

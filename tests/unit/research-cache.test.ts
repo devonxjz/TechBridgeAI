@@ -1,10 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   normalizeCompanyIdentity,
   decideCacheLookup,
   type IdentityCandidate,
   type NormalizedCompanyIdentity,
+  type ResearchCache,
 } from "@/modules/cache";
+import type { CompanyProfile } from "@/lib/types";
+import type { MemoryStorageAdapter } from "@/adapters/storage/memory";
 
 describe("Research Cache - Normalization", () => {
   it("normalizes tax ID, domain, and Vietnamese name without dropping legal suffixes", () => {
@@ -202,3 +205,166 @@ describe("Research Cache - Decision Logic", () => {
     expect(decideCacheLookup(nameOnly, [])).toEqual({ kind: "miss" });
   });
 });
+
+describe("ResearchCache - Storage-backed Cache Module", () => {
+  let storage: MemoryStorageAdapter;
+  let cache: ResearchCache;
+
+  const validProfile: CompanyProfile = {
+    id: "company-a",
+    version: 1,
+    createdAt: new Date("2026-08-26T00:00:00.000Z"),
+    lastUpdated: new Date("2026-08-26T08:00:00.000Z"),
+    input: { name: "FPT Corporation" },
+    officialName: "Công ty Cổ phần FPT",
+    tradingNames: ["FPT"],
+    taxId: "0101248141",
+    industry: ["Technology"],
+    description: "Technology Corporation",
+    keyPeople: [],
+    products: [],
+    markets: [],
+    recentActivities: [],
+    sources: [],
+    overallConfidence: 0.95,
+  };
+
+  const validReport = {
+    companyId: "company-a",
+    generatedAt: new Date("2026-08-26T08:00:00.000Z"),
+    riskFlags: [],
+    suggestedActions: [],
+    executiveSummary: "Executive Summary",
+  };
+
+  beforeEach(async () => {
+    const { MemoryStorageAdapter } = await import("@/adapters/storage/memory");
+    const { createResearchCache } = await import("@/modules/cache");
+    storage = new MemoryStorageAdapter();
+    cache = createResearchCache(storage);
+  });
+
+  it("resolves tax-ID match to an immediate hit with complete snapshot", async () => {
+    await storage.resolveOrCreateIdentity(
+      { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
+      "company-a"
+    );
+    await storage.persistResearchSnapshot(
+      { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
+      { profile: validProfile, report: validReport, diff: null }
+    );
+
+    const resolution = await cache.lookup({ name: "FPT", taxId: "0101248141" });
+    expect(resolution).toMatchObject({
+      kind: "hit",
+      matchedBy: "tax_id",
+      snapshot: { profile: { id: "company-a" } },
+    });
+  });
+
+  it("returns suggestions for name matches", async () => {
+    await storage.resolveOrCreateIdentity(
+      { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
+      "company-a"
+    );
+    await storage.persistResearchSnapshot(
+      { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
+      { profile: validProfile, report: validReport, diff: null }
+    );
+
+    const resolution = await cache.lookup({ name: "Công ty CP FPT" });
+    expect(resolution).toMatchObject({
+      kind: "suggestions",
+      suggestions: [
+        expect.objectContaining({
+          companyId: "company-a",
+          officialName: "Công ty Cổ phần FPT",
+        }),
+      ],
+    });
+  });
+
+  it("returns miss for unknown companies", async () => {
+    const resolution = await cache.lookup({ name: "Unknown Company" });
+    expect(resolution).toEqual({
+      kind: "miss",
+      identity: { taxId: null, domain: null, name: "unknown company" },
+      cacheInvalid: false,
+    });
+  });
+
+  it("rejects select when requested companyId is not in the suggestion candidate set", async () => {
+    // Seed company-a and company-b
+    await storage.resolveOrCreateIdentity(
+      { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
+      "company-a"
+    );
+    await storage.persistResearchSnapshot(
+      { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
+      { profile: validProfile, report: validReport, diff: null }
+    );
+
+    const profileB = { ...validProfile, id: "company-b", officialName: "Vingroup" };
+    const reportB = { ...validReport, companyId: "company-b" };
+    await storage.resolveOrCreateIdentity(
+      { taxId: "0101245486", domain: "vingroup.net", name: "tập đoàn vingroup" },
+      "company-b"
+    );
+    await storage.persistResearchSnapshot(
+      { taxId: "0101245486", domain: "vingroup.net", name: "tập đoàn vingroup" },
+      { profile: profileB, report: reportB, diff: null }
+    );
+
+    await expect(
+      cache.select({ name: "Công ty CP FPT" }, "company-b")
+    ).rejects.toMatchObject({ code: "invalid_cache_selection" });
+  });
+
+  it("rejects prepareRefresh when strong keys conflict with target company", async () => {
+    await storage.resolveOrCreateIdentity(
+      { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
+      "company-a"
+    );
+    await storage.persistResearchSnapshot(
+      { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
+      { profile: validProfile, report: validReport, diff: null }
+    );
+
+    await storage.resolveOrCreateIdentity(
+      { taxId: "0101245486", domain: "vingroup.net", name: "tập đoàn vingroup" },
+      "company-b"
+    );
+    const profileB = { ...validProfile, id: "company-b", officialName: "Vingroup" };
+    const reportB = { ...validReport, companyId: "company-b" };
+    await storage.persistResearchSnapshot(
+      { taxId: "0101245486", domain: "vingroup.net", name: "tập đoàn vingroup" },
+      { profile: profileB, report: reportB, diff: null }
+    );
+
+    // Refreshing company-b with company-a's tax ID must reject with identity_conflict
+    await expect(
+      cache.prepareRefresh({ name: "Vingroup", taxId: "0101248141" }, "company-b")
+    ).rejects.toMatchObject({ code: "identity_conflict" });
+  });
+
+  it("recovers from corrupt snapshot by returning miss with cacheInvalid: true", async () => {
+    await storage.resolveOrCreateIdentity(
+      { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
+      "company-a"
+    );
+
+    // Mock storage.getLatestCompleteSnapshot to throw CacheInvalidError
+    const { CacheInvalidError } = await import("@/modules/cache");
+    vi.spyOn(storage, "getLatestCompleteSnapshot").mockRejectedValueOnce(
+      new CacheInvalidError("Corrupted data")
+    );
+
+    const resolution = await cache.lookup({ name: "FPT", taxId: "0101248141" });
+    expect(resolution).toEqual({
+      kind: "miss",
+      identity: { taxId: "0101248141", domain: null, name: "fpt" },
+      cacheInvalid: true,
+    });
+  });
+});
+
