@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════
--- PartnerIQ — Research Cache Migration
+-- PartnerIQ — Supabase PostgreSQL Canonical Schema
 -- ═══════════════════════════════════════════════════════
 
 -- 1. Table for Canonical Company Identities
@@ -20,64 +20,44 @@ CREATE INDEX IF NOT EXISTS idx_company_identities_domain
 CREATE INDEX IF NOT EXISTS idx_company_identities_name
   ON public.company_identities (normalized_name);
 
--- 2. Add analysis_report column and complete profile index
-ALTER TABLE public.company_profiles
-  ADD COLUMN IF NOT EXISTS analysis_report JSONB;
+-- 2. Table for Company Profiles (Multi-versioning)
+CREATE TABLE IF NOT EXISTS public.company_profiles (
+  id TEXT NOT NULL,
+  version INT NOT NULL,
+  official_name TEXT NOT NULL,
+  data JSONB NOT NULL,
+  analysis_report JSONB,
+  created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+  PRIMARY KEY (id, version),
+  CONSTRAINT company_profiles_identity_fk FOREIGN KEY (id) REFERENCES public.company_identities(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_company_profiles_lookup 
+  ON public.company_profiles (id, version DESC);
+
+CREATE INDEX IF NOT EXISTS idx_company_profiles_updated 
+  ON public.company_profiles (updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_company_profiles_complete
   ON public.company_profiles (id, version DESC)
   WHERE analysis_report IS NOT NULL;
 
--- 3. Backfill identities from existing distinct company_profiles if any
-INSERT INTO public.company_identities (id, tax_id, normalized_domain, normalized_name, created_at, updated_at)
-SELECT DISTINCT ON (cp.id)
-  cp.id,
-  CASE
-    WHEN (cp.data->>'taxId') ~ '^\d{10}(\d{3})?$' THEN cp.data->>'taxId'
-    ELSE NULL
-  END AS tax_id,
-  CASE
-    WHEN cp.data->>'website' IS NOT NULL AND cp.data->>'website' <> '' THEN
-      regexp_replace(
-        regexp_replace(
-          lower(split_part(split_part(split_part(cp.data->>'website', '://', 2), '/', 1), ':', 1)),
-          '\.$', ''
-        ),
-        '^www\.', ''
-      )
-    ELSE NULL
-  END AS normalized_domain,
-  lower(trim(regexp_replace(cp.official_name, '\s+', ' ', 'g'))) AS normalized_name,
-  cp.created_at,
-  cp.updated_at
-FROM public.company_profiles cp
-ORDER BY cp.id, cp.version DESC
-ON CONFLICT (id) DO NOTHING;
+-- 3. Table for Profile Diffs
+CREATE TABLE IF NOT EXISTS public.company_diffs (
+  id TEXT PRIMARY KEY,
+  company_id TEXT NOT NULL,
+  from_version INT NOT NULL,
+  to_version INT NOT NULL,
+  data JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+  CONSTRAINT company_diffs_identity_fk FOREIGN KEY (company_id) REFERENCES public.company_identities(id)
+);
 
--- 4. Add foreign key constraints
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'company_profiles_identity_fk'
-  ) THEN
-    ALTER TABLE public.company_profiles
-      ADD CONSTRAINT company_profiles_identity_fk
-      FOREIGN KEY (id) REFERENCES public.company_identities(id);
-  END IF;
+CREATE INDEX IF NOT EXISTS idx_company_diffs_company 
+  ON public.company_diffs (company_id, created_at DESC);
 
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'company_diffs_identity_fk'
-  ) THEN
-    ALTER TABLE public.company_diffs
-      ADD CONSTRAINT company_diffs_identity_fk
-      FOREIGN KEY (company_id) REFERENCES public.company_identities(id);
-  END IF;
-END $$;
-
--- 5. RLS & Server-Only Privileges
-DROP POLICY IF EXISTS "Allow anon read/write company_profiles" ON public.company_profiles;
-DROP POLICY IF EXISTS "Allow anon read/write company_diffs" ON public.company_diffs;
-
+-- 4. Enable Row Level Security (RLS) & Server-Only Privileges
 ALTER TABLE public.company_identities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.company_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.company_diffs ENABLE ROW LEVEL SECURITY;
@@ -90,7 +70,7 @@ GRANT SELECT, INSERT, UPDATE ON public.company_identities TO service_role;
 GRANT SELECT, INSERT, UPDATE ON public.company_profiles TO service_role;
 GRANT SELECT, INSERT, UPDATE ON public.company_diffs TO service_role;
 
--- 6. Read-only Lookup RPC
+-- 5. Read-only Lookup RPC
 CREATE OR REPLACE FUNCTION public.lookup_company_identities(
   p_tax_id text,
   p_domain text,
@@ -126,7 +106,7 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.lookup_company_identities(text, text, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.lookup_company_identities(text, text, text) TO service_role;
 
--- 7. Transactional Resolve/Create Identity RPC
+-- 6. Transactional Resolve/Create Identity RPC
 CREATE OR REPLACE FUNCTION public.resolve_company_identity(
   p_tax_id text,
   p_domain text,
@@ -203,7 +183,7 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.resolve_company_identity(text, text, text, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.resolve_company_identity(text, text, text, text) TO service_role;
 
--- 8. Atomic Persist Research Snapshot RPC
+-- 7. Atomic Persist Research Snapshot RPC
 CREATE OR REPLACE FUNCTION public.persist_research_snapshot(
   p_company_id text,
   p_tax_id text,
