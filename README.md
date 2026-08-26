@@ -37,19 +37,7 @@ Khi bạn muốn hợp tác với một đối tác hoặc doanh nghiệp mới,
                        └────────────────────────────┘     └────────────────────────────┘
 ```
 
----
 
-## 🛠️ 5 Trụ Cột Công Nghệ Cốt Lõi (Core Technologies)
-
-| Biểu tượng | Công nghệ | Vai trò & Cách ứng dụng trong hệ thống |
-| :---: | :--- | :--- |
-| 🕸️ | **LangGraph** | **Điều phối luồng công việc (StateGraph Orchestration):** Quản lý trạng thái đa luồng song song (Fan-out / Fan-in) qua 5 nguồn dữ liệu độc lập, kiểm soát hạn mức (Token / Query Budget) và xử lý lỗi mềm. |
-| 🦜🔗 | **LangChain** | **Tương tác chuẩn hóa với LLM:** Sử dụng Zod Schemas để ép kiểu dữ liệu đầu ra nghiêm ngặt (Strict Structured Outputs), quản lý tin nhắn và streaming phản hồi theo thời gian thực. |
-| ⚡ | **Next.js 16 (Turbopack)** | **Fullstack Dashboard & SSE Streaming:** Giao diện người dùng hiện đại, truyền dữ liệu Server-Sent Events (SSE) trực tiếp từ backend tới dashboard với độ trễ thấp. |
-| 🗄️ | **Supabase (PostgreSQL)** | **Lưu trữ & Cache Thông Minh:** Quản lý lịch sử hồ sơ dạng JSONB, hỗ trợ cache read-through với khóa phân tán (`pg_advisory_xact_lock`) chống nghẽn và lưu vết thay đổi đa phiên bản. |
-| 🔭 | **Langfuse Cloud** | **Giám sát & Tối ưu AI (Observability):** Ghi nhận toàn bộ Trace của đồ thị LangGraph, đo lường độ trễ, chi phí token, tự động làm sạch dữ liệu nhạy cảm và chấm điểm chất lượng nghiên cứu. |
-
----
 
 ## 🔄 Sơ Đồ Quy Trình Điều Phối (LangGraph StateGraph Workflow)
 
