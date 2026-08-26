@@ -53,6 +53,51 @@ export function hashCompanyIdentifier(identifier: string): string {
   return crypto.createHmac("sha256", salt).update(identifier).digest("hex");
 }
 
+export function fingerprintCacheKey(
+  keyType: "tax_id" | "domain",
+  value: string,
+  secret: string | undefined = process.env.LANGFUSE_SALT || process.env.CACHE_KEY_HMAC_SECRET
+): string | undefined {
+  if (!secret || !value) return undefined;
+  return crypto.createHmac("sha256", secret).update(`${keyType}:${value}`).digest("hex");
+}
+
+export interface ResearchCacheTelemetry {
+  cacheOutcome:
+    | "hit"
+    | "miss"
+    | "suggestions"
+    | "refresh"
+    | "bypass"
+    | "conflict"
+    | "invalid";
+  matchedBy?: "tax_id" | "domain" | "normalized_name" | "selected" | "user_selection";
+  companyId?: string;
+  version?: number;
+  lastSyncedAt?: string;
+  lookupDurationMs?: number;
+  conflictingCompanyIds?: string[];
+  keyType?: "tax_id" | "domain";
+  keyFingerprint?: string;
+}
+
+export function updateResearchCacheOutcome(
+  telemetry: ResearchCacheTelemetry,
+): void {
+  if (!isLangfuseEnabled()) return;
+  updateActiveObservation({
+    output: {
+      cacheOutcome: telemetry.cacheOutcome,
+      matchedBy: telemetry.matchedBy,
+      version: telemetry.version,
+      lastSyncedAt: telemetry.lastSyncedAt,
+      lookupDurationMs: telemetry.lookupDurationMs,
+      keyType: telemetry.keyType,
+      keyFingerprint: telemetry.keyFingerprint,
+    },
+  });
+}
+
 export interface DeterministicScore {
   name: string;
   value: number | string;
