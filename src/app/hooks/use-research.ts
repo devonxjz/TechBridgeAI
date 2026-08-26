@@ -1,28 +1,41 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type {
   CompanyInput,
   CompanyProfile,
   ProfileDiff,
   AnalysisReport,
   SourceName,
+  StreamEvent,
+  CacheSuggestion,
+  CacheHitMatchedBy,
+  ResearchErrorCode,
+  ResearchRequest,
 } from "@/lib/types";
 
 export type SourceStatus = "idle" | "started" | "done" | "failed";
 
 export interface ResearchState {
-  status: "idle" | "researching" | "building" | "done" | "error";
+  status: "idle" | "researching" | "building" | "suggesting" | "done" | "error";
   input: CompanyInput | null;
   sourceStatuses: Record<SourceName, SourceStatus>;
-  findings: { source: SourceName; summary: string }[];
+  findings: { source: SourceName; summary: string; url?: string }[];
   profile: CompanyProfile | null;
   diff: ProfileDiff | null;
   report: AnalysisReport | null;
   error: string | null;
+  errorCode?: ResearchErrorCode;
+  notice?: string | null;
+  suggestions: CacheSuggestion[];
+  cacheHit: {
+    matchedBy: CacheHitMatchedBy;
+    version: number;
+    lastSyncedAt: string;
+  } | null;
 }
 
-const INITIAL_STATE: ResearchState = {
+export const INITIAL_STATE: ResearchState = {
   status: "idle",
   input: null,
   sourceStatuses: {
@@ -37,155 +50,252 @@ const INITIAL_STATE: ResearchState = {
   diff: null,
   report: null,
   error: null,
+  notice: null,
+  suggestions: [],
+  cacheHit: null,
 };
+
+export function buildResearchRequest(
+  input: CompanyInput,
+  cache?: ResearchRequest["cache"]
+): ResearchRequest {
+  return cache ? { input, cache } : { input };
+}
+
+export function reduceResearchEvent(
+  state: ResearchState,
+  event: StreamEvent
+): ResearchState {
+  switch (event.event) {
+    case "research:start":
+      return {
+        ...state,
+        status: "researching",
+        error: null,
+        errorCode: undefined,
+        sourceStatuses: {
+          web_search: "idle",
+          website: "idle",
+          registry: "idle",
+          news: "idle",
+          linkedin: "idle",
+        },
+      };
+
+    case "research:progress":
+      return {
+        ...state,
+        sourceStatuses: {
+          ...state.sourceStatuses,
+          [event.data.source]: event.data.status as SourceStatus,
+        },
+      };
+
+    case "research:finding":
+      return {
+        ...state,
+        findings: [
+          ...state.findings,
+          {
+            source: event.data.source,
+            summary: event.data.summary,
+            url: event.data.url,
+          },
+        ],
+      };
+
+    case "profile:building":
+      return {
+        ...state,
+        status: "building",
+      };
+
+    case "profile:ready":
+      return {
+        ...state,
+        profile: event.data.profile,
+      };
+
+    case "diff:ready":
+      return {
+        ...state,
+        diff: event.data.diff,
+      };
+
+    case "analysis:ready":
+      return {
+        ...state,
+        report: event.data.report,
+      };
+
+    case "cache:hit":
+      return {
+        ...state,
+        cacheHit: {
+          matchedBy: event.data.matchedBy,
+          version: event.data.version,
+          lastSyncedAt: event.data.lastSyncedAt,
+        },
+      };
+
+    case "cache:suggestions":
+      return {
+        ...state,
+        status: "suggesting",
+        suggestions: event.data.suggestions,
+      };
+
+    case "error":
+      if (event.data.code === "cache_invalid") {
+        return {
+          ...state,
+          notice: event.data.message,
+        };
+      }
+      return {
+        ...state,
+        error: event.data.message,
+        errorCode: event.data.code,
+      };
+
+    case "done":
+      if (state.status === "suggesting") {
+        return state;
+      }
+      return {
+        ...state,
+        status: state.error && !state.profile ? "error" : "done",
+      };
+
+    default:
+      return state;
+  }
+}
 
 export function useResearch() {
   const [state, setState] = useState<ResearchState>(INITIAL_STATE);
   const abortRef = useRef<AbortController | null>(null);
 
-  const research = useCallback(async (input: CompanyInput) => {
-    // Abort previous research
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
+  const research = useCallback(
+    async (input: CompanyInput, cache?: ResearchRequest["cache"]) => {
+      // Abort previous research
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
 
-    setState({
-      ...INITIAL_STATE,
-      input,
-      status: "researching",
-    });
-
-    try {
-      const response = await fetch("/api/research", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-        signal: controller.signal,
+      setState({
+        ...INITIAL_STATE,
+        input,
+        status: "researching",
       });
 
-      if (!response.ok) {
-        const errBody = await response.json().catch(() => ({}));
-        throw new Error(
-          (errBody as { error?: string }).error ?? `HTTP ${response.status}`
-        );
-      }
+      try {
+        const payload = buildResearchRequest(input, cache);
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response stream");
+        const response = await fetch("/api/research", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
 
-      const decoder = new TextDecoder();
-      let buffer = "";
+        if (!response.ok) {
+          const errBody = (await response.json().catch(() => ({}))) as {
+            error?: string;
+            code?: ResearchErrorCode;
+          };
+          setState((prev) => ({
+            ...prev,
+            status: "error",
+            error: errBody.error ?? `HTTP ${response.status}`,
+            errorCode: errBody.code,
+          }));
+          return;
+        }
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error("No response stream");
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
+        const decoder = new TextDecoder();
+        let buffer = "";
 
-        let currentEvent = "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith("data: ") && currentEvent) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              handleSSEEvent(currentEvent, data, setState);
-            } catch {
-              // Skip malformed JSON
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          let currentEvent = "";
+          for (const line of lines) {
+            if (line.startsWith("event: ")) {
+              currentEvent = line.slice(7).trim();
+            } else if (line.startsWith("data: ") && currentEvent) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                const streamEvent = {
+                  event: currentEvent,
+                  data,
+                } as StreamEvent;
+                setState((prev) => reduceResearchEvent(prev, streamEvent));
+              } catch {
+                // Skip malformed JSON
+              }
+              currentEvent = "";
             }
-            currentEvent = "";
           }
         }
+      } catch (err) {
+        if ((err as Error).name === "AbortError") return;
+        setState((prev) => ({
+          ...prev,
+          status: "error",
+          error: (err as Error).message,
+        }));
       }
-    } catch (err) {
-      if ((err as Error).name === "AbortError") return;
-      setState((prev) => ({
-        ...prev,
-        status: "error",
-        error: (err as Error).message,
-      }));
-    }
-  }, []);
+    },
+    []
+  );
+
+  const selectSuggestion = useCallback(
+    (companyId: string) => {
+      if (!state.input) return;
+      void research(state.input, { action: "select", companyId });
+    },
+    [research, state.input]
+  );
+
+  const refreshResearch = useCallback(() => {
+    if (!state.input || !state.profile) return;
+    void research(state.input, {
+      action: "refresh",
+      companyId: state.profile.id,
+    });
+  }, [research, state.input, state.profile]);
+
+  const bypassAndResearch = useCallback(() => {
+    if (!state.input) return;
+    void research(state.input, { action: "bypass" });
+  }, [research, state.input]);
 
   const reset = useCallback(() => {
     abortRef.current?.abort();
     setState(INITIAL_STATE);
   }, []);
 
-  return { state, research, reset };
-}
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
-function handleSSEEvent(
-  event: string,
-  data: Record<string, unknown>,
-  setState: React.Dispatch<React.SetStateAction<ResearchState>>
-) {
-  switch (event) {
-    case "research:progress":
-      setState((prev) => ({
-        ...prev,
-        sourceStatuses: {
-          ...prev.sourceStatuses,
-          [data.source as string]: data.status as SourceStatus,
-        },
-      }));
-      break;
-
-    case "research:finding":
-      setState((prev) => ({
-        ...prev,
-        findings: [
-          ...prev.findings,
-          {
-            source: data.source as SourceName,
-            summary: data.summary as string,
-          },
-        ],
-      }));
-      break;
-
-    case "profile:building":
-      setState((prev) => ({
-        ...prev,
-        status: "building",
-      }));
-      break;
-
-    case "profile:ready":
-      setState((prev) => ({
-        ...prev,
-        profile: data.profile as CompanyProfile,
-      }));
-      break;
-
-    case "diff:ready":
-      setState((prev) => ({
-        ...prev,
-        diff: (data.diff as ProfileDiff) ?? null,
-      }));
-      break;
-
-    case "analysis:ready":
-      setState((prev) => ({
-        ...prev,
-        report: (data.report as AnalysisReport) ?? null,
-      }));
-      break;
-
-    case "error":
-      setState((prev) => ({
-        ...prev,
-        error: data.message as string,
-      }));
-      break;
-
-    case "done":
-      setState((prev) => ({
-        ...prev,
-        status: prev.error && !prev.profile ? "error" : "done",
-      }));
-      break;
-  }
+  return {
+    state,
+    research,
+    selectSuggestion,
+    refreshResearch,
+    bypassAndResearch,
+    reset,
+  };
 }

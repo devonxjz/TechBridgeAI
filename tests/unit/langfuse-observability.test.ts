@@ -51,6 +51,9 @@ import {
   flushLangfuse,
   initOpenTelemetry,
   traceResearch,
+  hashCompanyIdentifier,
+  fingerprintCacheKey,
+  updateResearchCacheOutcome,
 } from "@/observability/langfuse";
 import type { SourceExecutionResult } from "@/lib/types";
 import * as langfuseObservability from "@/observability/langfuse";
@@ -293,5 +296,85 @@ describe("Langfuse Observability & Privacy Minimization", () => {
       { traceId: "trace-123", name: "research_success", value: "complete" },
     ]);
     expect(clientMocks.flush).toHaveBeenCalledOnce();
+  });
+
+  it("hashes company identifier deterministically with salt", () => {
+    vi.stubEnv("LANGFUSE_SALT", "test-secret-salt");
+    const hash1 = hashCompanyIdentifier("0101248141");
+    const hash2 = hashCompanyIdentifier("0101248141");
+    const hashDiff = hashCompanyIdentifier("0101245486");
+
+    expect(hash1).toBe(hash2);
+    expect(hash1).not.toBe(hashDiff);
+    expect(hash1).toHaveLength(64); // SHA-256 hex length
+  });
+
+  it("fingerprints low-entropy tax IDs with a keyed HMAC", () => {
+    const first = fingerprintCacheKey("tax_id", "0101248141", "secret-a");
+    const second = fingerprintCacheKey("tax_id", "0101248141", "secret-b");
+
+    expect(first).toMatch(/^[a-f0-9]{64}$/);
+    expect(first).not.toContain("0101248141");
+    expect(second).not.toBe(first);
+    expect(fingerprintCacheKey("tax_id", "0101248141", undefined)).toBeUndefined();
+  });
+
+  it("updates active observation with research cache telemetry", () => {
+    vi.stubEnv("LANGFUSE_ENABLED", "true");
+    vi.stubEnv("LANGFUSE_PUBLIC_KEY", "pk-test");
+    vi.stubEnv("LANGFUSE_SECRET_KEY", "sk-test");
+
+    updateResearchCacheOutcome({
+      cacheOutcome: "hit",
+      matchedBy: "tax_id",
+      version: 1,
+      lastSyncedAt: "2026-08-26T08:00:00.000Z",
+      lookupDurationMs: 42,
+      keyType: "tax_id",
+      keyFingerprint: "fingerprint-123",
+    });
+
+    expect(tracingMocks.updateActiveObservation).toHaveBeenCalledWith({
+      output: {
+        cacheOutcome: "hit",
+        matchedBy: "tax_id",
+        version: 1,
+        lastSyncedAt: "2026-08-26T08:00:00.000Z",
+        lookupDurationMs: 42,
+        keyType: "tax_id",
+        keyFingerprint: "fingerprint-123",
+      },
+    });
+  });
+
+  it("includes cache metadata in trace attributes", async () => {
+    vi.stubEnv("LANGFUSE_ENABLED", "true");
+    vi.stubEnv("LANGFUSE_PUBLIC_KEY", "pk-test");
+    vi.stubEnv("LANGFUSE_SECRET_KEY", "sk-test");
+
+    await traceResearch(
+      {
+        researchRunId: "run-cache-hit",
+        companyId: "comp-fpt",
+        requestedSources: [],
+        cacheHit: true,
+        cacheMatchedBy: "tax_id",
+        cacheAction: "auto",
+      },
+      async () => undefined
+    );
+
+    expect(tracingMocks.propagateAttributes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tags: expect.arrayContaining(["cache:hit"]),
+        metadata: expect.objectContaining({
+          cacheHit: "true",
+          cacheMatchedBy: "tax_id",
+          cacheAction: "auto",
+          companyIdHash: expect.any(String),
+        }),
+      }),
+      expect.any(Function)
+    );
   });
 });

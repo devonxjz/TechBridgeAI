@@ -137,10 +137,18 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
             {/* Criteria Breakdown (5 Core Criteria) */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
               {report.fitScore.criteria.map((c) => (
-                <div key={c.name} className="bg-surface/90 rounded-lg p-3 border border-card-border">
+                <a
+                  key={c.name}
+                  href={`https://www.google.com/search?q=${encodeURIComponent(`${profile.officialName} ${c.name}`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-surface/90 hover:bg-card-border/70 rounded-lg p-3 border border-card-border hover:border-accent/40 transition-all block group cursor-pointer"
+                  title="Nhấn để mở nguồn tìm kiếm chứng cứ thực tế"
+                >
                   <div className="flex items-center justify-between text-xs mb-1.5">
-                    <span className="font-semibold text-foreground/90">
+                    <span className="font-semibold text-foreground/90 group-hover:text-accent-light flex items-center gap-1">
                       {c.name} <span className="text-muted/60">({Math.round(c.weight * 100)}%)</span>
+                      <span className="text-[10px] text-muted opacity-0 group-hover:opacity-100 transition-opacity">↗</span>
                     </span>
                     <span className={`font-bold ${c.score >= 80 ? "text-success" : c.score >= 60 ? "text-warning" : "text-error"}`}>
                       {c.score}/100
@@ -161,7 +169,7 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
                   <p className="text-xs text-muted leading-relaxed">
                     {c.reasoning}
                   </p>
-                </div>
+                </a>
               ))}
             </div>
 
@@ -171,9 +179,18 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
                 <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-1.5">
                   Nhận định chuyên gia (Executive Summary)
                 </p>
-                <p className="text-xs text-foreground/80 leading-relaxed bg-surface/70 rounded-lg p-3 border border-card-border">
-                  {report.executiveSummary}
-                </p>
+                <a
+                  href={`https://www.google.com/search?q=${encodeURIComponent(`${profile.officialName} thông tin đánh giá doanh nghiệp`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-xs text-foreground/80 leading-relaxed bg-surface/70 hover:bg-card-border/70 rounded-lg p-3 border border-card-border hover:border-accent/30 transition-all group"
+                  title="Nhấn để tìm kiếm chứng cứ tổng quan"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span>{report.executiveSummary}</span>
+                    <span className="text-[11px] text-muted group-hover:text-accent-light shrink-0">Kiểm chứng ↗</span>
+                  </div>
+                </a>
               </div>
             )}
 
@@ -187,21 +204,30 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
                   </p>
                   <div className="space-y-2">
                     {report.riskFlags.map((rf, i) => (
-                      <div
+                      <a
                         key={i}
-                        className={`text-xs p-2.5 rounded-lg border-l-2 bg-surface/80 ${
+                        href={`https://www.google.com/search?q=${encodeURIComponent(`${profile.officialName} rủi ro ${rf.type} ${rf.description.slice(0, 60)}`)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`block text-xs p-2.5 rounded-lg border-l-2 bg-surface/80 hover:bg-card-border/70 transition-all group ${
                           rf.severity === "high"
                             ? "border-l-error text-error/90"
                             : rf.severity === "medium"
                               ? "border-l-warning text-warning/90"
                               : "border-l-muted text-muted"
                         }`}
+                        title="Nhấn để tìm chứng cứ rủi ro này"
                       >
-                        <span className="font-semibold uppercase tracking-wider text-[10px] block">
-                          [{rf.type}] {rf.severity}
-                        </span>
-                        {rf.description}
-                      </div>
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold uppercase tracking-wider text-[10px] block">
+                            [{rf.type}] {rf.severity}
+                          </span>
+                          <span className="text-[10px] text-muted opacity-0 group-hover:opacity-100 transition-opacity">
+                            Xem chứng cứ ↗
+                          </span>
+                        </div>
+                        <span className="block mt-0.5">{rf.description}</span>
+                      </a>
                     ))}
                   </div>
                 </div>
@@ -215,24 +241,35 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
                   </p>
                   <div className="space-y-2">
                     {report.suggestedActions.map((sa, i) => (
-                      <div
+                      <a
                         key={i}
-                        className="text-xs p-2.5 rounded-lg bg-surface/80 border border-card-border"
+                        href={`https://www.google.com/search?q=${encodeURIComponent(`${profile.officialName} ${sa.action}`)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block text-xs p-2.5 rounded-lg bg-surface/80 hover:bg-card-border/70 border border-card-border hover:border-accent/30 transition-all group"
+                        title="Nhấn để tìm dữ liệu hỗ trợ hành động này"
                       >
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <span
-                            className={`px-1.5 py-0.2 text-[10px] font-bold rounded uppercase ${
-                              sa.priority === "high"
-                                ? "bg-accent/20 text-accent-light"
-                                : "bg-card-border text-muted"
-                            }`}
-                          >
-                            {sa.priority}
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`px-1.5 py-0.2 text-[10px] font-bold rounded uppercase ${
+                                sa.priority === "high"
+                                  ? "bg-accent/20 text-accent-light"
+                                  : "bg-card-border text-muted"
+                              }`}
+                            >
+                              {sa.priority}
+                            </span>
+                            <span className="font-semibold text-foreground group-hover:text-accent-light">
+                              {sa.action}
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-muted opacity-0 group-hover:opacity-100 transition-opacity">
+                            Tìm kiếm ↗
                           </span>
-                          <span className="font-semibold text-foreground">{sa.action}</span>
                         </div>
                         <p className="text-muted leading-relaxed">{sa.reasoning}</p>
-                      </div>
+                      </a>
                     ))}
                   </div>
                 </div>
@@ -243,9 +280,22 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
 
         {/* Description */}
         <Section title="Tổng quan">
-          <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">
-            {profile.description}
-          </p>
+          <a
+            href={`https://www.google.com/search?q=${encodeURIComponent(`${profile.officialName} thông tin giới thiệu doanh nghiệp`)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block p-3.5 rounded-xl bg-surface/60 hover:bg-card-border/60 border border-card-border/40 hover:border-accent/30 transition-all group"
+            title="Nhấn để mở nguồn chứng cứ giới thiệu"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">
+                {profile.description}
+              </p>
+              <span className="text-[11px] text-muted group-hover:text-accent-light shrink-0">
+                Kiểm chứng ↗
+              </span>
+            </div>
+          </a>
         </Section>
 
         {/* Key Info Grid */}
@@ -253,28 +303,49 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
           {profile.website && (
             <InfoItem
               label="Website"
-              value={
-                <a
-                  href={profile.website}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-accent-light hover:underline"
-                >
-                  {profile.website.replace(/^https?:\/\//, "")}
-                </a>
-              }
+              href={profile.website}
+              title="Nhấn để mở website chính thức"
+              value={profile.website.replace(/^https?:\/\//, "")}
             />
           )}
-          {profile.taxId && <InfoItem label="Mã số thuế" value={profile.taxId} />}
+          {profile.taxId && (
+            <InfoItem
+              label="Mã số thuế"
+              href={`https://masothue.com/Search/?q=${encodeURIComponent(profile.taxId)}&type=auto`}
+              title="Nhấn để kiểm tra mã số thuế trên cổng ĐKKD"
+              value={profile.taxId}
+            />
+          )}
           {profile.foundedYear && (
-            <InfoItem label="Năm thành lập" value={String(profile.foundedYear)} />
+            <InfoItem
+              label="Năm thành lập"
+              href={`https://www.google.com/search?q=${encodeURIComponent(`${profile.officialName} năm thành lập`)}`}
+              title="Nhấn để kiểm tra năm thành lập"
+              value={String(profile.foundedYear)}
+            />
           )}
           {profile.companySize && (
-            <InfoItem label="Quy mô" value={`${profile.companySize} nhân sự`} />
+            <InfoItem
+              label="Quy mô"
+              href={`https://www.google.com/search?q=${encodeURIComponent(`${profile.officialName} quy mô nhân sự nhân viên`)}`}
+              title="Nhấn để kiểm tra quy mô nhân sự"
+              value={`${profile.companySize} nhân sự`}
+            />
           )}
           {profile.headquarters && (
             <InfoItem
               label="Trụ sở"
+              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                [
+                  profile.headquarters.street,
+                  profile.headquarters.city,
+                  profile.headquarters.province,
+                  profile.headquarters.country,
+                ]
+                  .filter(Boolean)
+                  .join(", ")
+              )}`}
+              title="Nhấn để xem địa chỉ trụ sở trên Google Maps"
               value={[
                 profile.headquarters.city,
                 profile.headquarters.province,
@@ -291,18 +362,27 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
           <Section title="Nhân sự chủ chốt">
             <div className="space-y-2">
               {profile.keyPeople.map((person, i) => (
-                <div
+                <a
                   key={i}
-                  className="flex items-center gap-3 bg-surface rounded-xl px-4 py-2.5"
+                  href={`https://www.google.com/search?q=${encodeURIComponent(`${profile.officialName} "${person.name}" ${person.title}`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-3 bg-surface hover:bg-card-border/70 rounded-xl px-4 py-2.5 transition-all border border-card-border/40 hover:border-accent/30 group"
+                  title="Nhấn để kiểm tra hồ sơ nhân sự"
                 >
                   <div className="w-8 h-8 bg-accent/20 rounded-full flex items-center justify-center text-sm font-bold text-accent-light">
                     {person.name.charAt(0)}
                   </div>
-                  <div>
-                    <p className="text-sm font-medium">{person.name}</p>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium group-hover:text-accent-light flex items-center gap-1.5">
+                      {person.name}
+                      <span className="text-[10px] text-muted opacity-0 group-hover:opacity-100 transition-opacity">
+                        ↗
+                      </span>
+                    </p>
                     <p className="text-xs text-muted">{person.title}</p>
                   </div>
-                </div>
+                </a>
               ))}
             </div>
           </Section>
@@ -313,12 +393,17 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
           <Section title="Sản phẩm / Dịch vụ">
             <div className="flex flex-wrap gap-2">
               {profile.products.map((p) => (
-                <span
+                <a
                   key={p}
-                  className="px-3 py-1 text-xs bg-surface rounded-lg border border-card-border"
+                  href={`https://www.google.com/search?q=${encodeURIComponent(`${profile.officialName} "${p}"`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1 text-xs bg-surface hover:bg-accent/20 hover:text-accent-light rounded-lg border border-card-border hover:border-accent/30 transition-all inline-flex items-center gap-1 group"
+                  title="Nhấn để mở kiểm chứng sản phẩm"
                 >
-                  {p}
-                </span>
+                  <span>{p}</span>
+                  <span className="text-[9px] text-muted group-hover:text-accent-light">↗</span>
+                </a>
               ))}
             </div>
           </Section>
@@ -329,12 +414,17 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
           <Section title="Thị trường">
             <div className="flex flex-wrap gap-2">
               {profile.markets.map((m) => (
-                <span
+                <a
                   key={m}
-                  className="px-3 py-1 text-xs bg-surface rounded-lg border border-card-border"
+                  href={`https://www.google.com/search?q=${encodeURIComponent(`${profile.officialName} thị trường "${m}"`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1 text-xs bg-surface hover:bg-accent/20 hover:text-accent-light rounded-lg border border-card-border hover:border-accent/30 transition-all inline-flex items-center gap-1 group"
+                  title="Nhấn để mở kiểm chứng thị trường"
                 >
-                  {m}
-                </span>
+                  <span>{m}</span>
+                  <span className="text-[9px] text-muted group-hover:text-accent-light">↗</span>
+                </a>
               ))}
             </div>
           </Section>
@@ -345,10 +435,22 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
           <Section title="Hoạt động gần đây">
             <div className="space-y-2">
               {profile.recentActivities.slice(0, 5).map((act, i) => (
-                <div key={i} className="bg-surface rounded-xl px-4 py-3">
-                  <p className="text-sm font-medium">{act.title}</p>
+                <a
+                  key={i}
+                  href={`https://www.google.com/search?q=${encodeURIComponent(`${profile.officialName} ${act.title}`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block bg-surface hover:bg-card-border/70 rounded-xl px-4 py-3 border border-card-border/40 hover:border-accent/30 transition-all group"
+                  title="Nhấn để mở kiểm chứng hoạt động gần đây"
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium group-hover:text-accent-light">{act.title}</p>
+                    <span className="text-[10px] text-muted group-hover:text-accent-light">
+                      Xem chứng cứ ↗
+                    </span>
+                  </div>
                   <p className="text-xs text-muted mt-1">{act.summary}</p>
-                </div>
+                </a>
               ))}
             </div>
           </Section>
@@ -443,12 +545,36 @@ function Section({
 function InfoItem({
   label,
   value,
+  href,
+  title,
 }: {
   label: string;
   value: React.ReactNode;
+  href?: string;
+  title?: string;
 }) {
+  if (href) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block bg-surface hover:bg-card-border/70 rounded-xl px-4 py-3 border border-card-border/40 hover:border-accent/40 transition-all group"
+        title={title}
+      >
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-muted mb-0.5">{label}</p>
+          <span className="text-[10px] text-muted opacity-0 group-hover:opacity-100 transition-opacity">
+            ↗
+          </span>
+        </div>
+        <p className="text-sm font-medium group-hover:text-accent-light">{value}</p>
+      </a>
+    );
+  }
+
   return (
-    <div className="bg-surface rounded-xl px-4 py-3">
+    <div className="bg-surface rounded-xl px-4 py-3 border border-card-border/40">
       <p className="text-xs text-muted mb-0.5">{label}</p>
       <p className="text-sm font-medium">{value}</p>
     </div>

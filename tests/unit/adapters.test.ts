@@ -174,5 +174,119 @@ describe("Adapters Unit Tests", () => {
       expect(diffs.length).toBe(1);
       expect(diffs[0].summary).toBe("Updated description");
     });
+
+    it("resolves, persists, and retrieves complete research snapshots", async () => {
+      const identity = {
+        taxId: "0101245486",
+        domain: "vingroup.net",
+        name: "tập đoàn vingroup",
+      };
+
+      const resolvedId = await storage.resolveOrCreateIdentity(identity, "company-a");
+      expect(resolvedId).toBe("company-a");
+
+      const draftSnapshot = {
+        profile: createDummyProfile("company-a", 1),
+        report: {
+          companyId: "company-a",
+          generatedAt: new Date(),
+          riskFlags: [],
+          suggestedActions: [],
+          executiveSummary: "Summary",
+        },
+        diff: null,
+      };
+
+      const saved = await storage.persistResearchSnapshot(identity, draftSnapshot);
+      expect(saved.profile.id).toBe("company-a");
+      expect(saved.lastSyncedAt).toBeDefined();
+
+      const candidates = await storage.findIdentityCandidates(identity);
+      expect(candidates).toEqual([
+        expect.objectContaining({ companyId: "company-a", taxId: "0101245486" }),
+      ]);
+
+      const snapshot = await storage.getLatestCompleteSnapshot("company-a");
+      expect(snapshot).toMatchObject({
+        profile: { id: "company-a", version: 1 },
+        report: { companyId: "company-a" },
+        diff: null,
+      });
+    });
+
+    it("handles version 2 snapshot with matching diff", async () => {
+      const identity = {
+        taxId: "0101245486",
+        domain: "vingroup.net",
+        name: "tập đoàn vingroup",
+      };
+
+      await storage.resolveOrCreateIdentity(identity, "company-a");
+
+      const v1Draft = {
+        profile: createDummyProfile("company-a", 1),
+        report: {
+          companyId: "company-a",
+          generatedAt: new Date(),
+          riskFlags: [],
+          suggestedActions: [],
+          executiveSummary: "Summary v1",
+        },
+        diff: null,
+      };
+      await storage.persistResearchSnapshot(identity, v1Draft);
+
+      const v2Diff: ProfileDiff = {
+        companyId: "company-a",
+        fromVersion: 1,
+        toVersion: 2,
+        changes: [{ field: "description", oldValue: "v1", newValue: "v2", changeType: "modified", significance: "medium" }],
+        summary: "Upgraded to v2",
+      };
+
+      const v2Draft = {
+        profile: createDummyProfile("company-a", 2),
+        report: {
+          companyId: "company-a",
+          generatedAt: new Date(),
+          riskFlags: [],
+          suggestedActions: [],
+          executiveSummary: "Summary v2",
+        },
+        diff: v2Diff,
+      };
+      await storage.persistResearchSnapshot(identity, v2Draft);
+
+      const snapshot = await storage.getLatestCompleteSnapshot("company-a");
+      expect(snapshot).toMatchObject({
+        profile: { id: "company-a", version: 2 },
+        report: { companyId: "company-a", executiveSummary: "Summary v2" },
+        diff: { toVersion: 2, summary: "Upgraded to v2" },
+      });
+    });
+
+    it("throws IdentityConflictError when tax ID is assigned to another company", async () => {
+      await storage.resolveOrCreateIdentity(
+        { taxId: "0101245486", domain: "vingroup.net", name: "vingroup" },
+        "company-a"
+      );
+
+      await expect(
+        storage.persistResearchSnapshot(
+          { taxId: "0101245486", domain: "other.vn", name: "other" },
+          {
+            profile: createDummyProfile("company-b", 1),
+            report: {
+              companyId: "company-b",
+              generatedAt: new Date(),
+              riskFlags: [],
+              suggestedActions: [],
+              executiveSummary: "Summary",
+            },
+            diff: null,
+          }
+        )
+      ).rejects.toThrow("Thông tin định danh công ty mâu thuẫn.");
+    });
   });
 });

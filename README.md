@@ -1,535 +1,148 @@
 # PartnerIQ (TechBridgeAI) 🚀
 
-> **AI-Powered Corporate Intelligence & Collaboration Intelligence Platform**  
-> Nền tảng thẩm định doanh nghiệp thông minh tự động: Thu thập dữ liệu đa nguồn độc lập, tổng hợp hồ sơ chuẩn hóa qua LLM, đánh giá điểm phù hợp hợp tác (Collaboration Fit Score), theo dõi biến động lịch sử (Diff Engine) và xuất báo cáo One-Pager PDF chuyên nghiệp.
+> **AI-Powered Corporate Intelligence & Collaboration Fit Platform**  
+> Nền tảng thẩm định doanh nghiệp thông minh: Tự động thu thập dữ liệu đa nguồn từ Internet, chuẩn hóa hồ sơ 360° qua LLM, chấm điểm tiềm năng hợp tác kinh doanh (Fit Score), nhận diện biến động theo thời gian và xuất báo cáo PDF One-Pager chuyên nghiệp.
 
 [![CI Pipeline](https://github.com/devonxjz/TechBridgeAI/actions/workflows/ci.yml/badge.svg)](https://github.com/devonxjz/TechBridgeAI/actions/workflows/ci.yml)
-[![Tests Passing](https://img.shields.io/badge/Tests-23%20Suites%20%7C%20136%20Passed-success?logo=vitest)](https://vitest.dev/)
+[![Tests Passing](https://img.shields.io/badge/Tests-27%20Suites%20%7C%20207%20Passed-success?logo=vitest)](https://vitest.dev/)
 [![Next.js 16](https://img.shields.io/badge/Next.js-16%20(Turbopack)-black?logo=next.js)](https://nextjs.org/)
 [![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph%20v1.4-blue?logo=langchain)](https://langchain.com/)
+[![LangChain](https://img.shields.io/badge/Framework-LangChain-1C3C3C?logo=langchain)](https://langchain.com/)
+[![OpenAI](https://img.shields.io/badge/LLM-OpenAI%20gpt--4o--mini-412991?logo=openai)](https://openai.com/)
+[![Supabase](https://img.shields.io/badge/Database-Supabase%20PostgreSQL-3ECF8E?logo=supabase)](https://supabase.com)
 [![Langfuse](https://img.shields.io/badge/Observability-Langfuse%20Cloud-orange)](https://langfuse.com/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x%20%2F%207.0.2-blue?logo=typescript)](https://www.typescriptlang.org/)
-[![OpenAI](https://img.shields.io/badge/AI-OpenAI%20Structured%20Outputs-412991?logo=openai)](https://openai.com/)
-[![Supabase](https://img.shields.io/badge/Storage-Supabase%20PostgreSQL-3ECF8E?logo=supabase)](https://supabase.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 ---
 
-## 🖼️ Tổng Quan Kiến Trúc Hệ Thống (System Overview)
+## 🖼️ Kiến Trúc Hệ Thống (System Architecture)
 
 <div align="center">
-  <img src="./public/architecture-overview.jpg" alt="PartnerIQ System Architecture Overview" width="100%" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.12);" />
-  <p><em>Hình 1: Kiến trúc tổng thể hệ sinh thái PartnerIQ (TechBridgeAI) — Tương tác đa nguồn, xử lý lõi AI, lưu trữ đa phiên bản và xuất bản tài liệu.</em></p>
+  <img src="./public/architecture-light.png" alt="PartnerIQ System Architecture Overview" width="100%" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.08);" />
+  <p><em>Kiến trúc tổng thể hệ sinh thái PartnerIQ — Quy trình thu thập đa nguồn, điều phối LangGraph, xử lý AI, lưu trữ Supabase và xuất bản báo cáo.</em></p>
 </div>
 
 ---
 
-## 🌟 Tính Năng Nổi Bật
+## 💡 PartnerIQ Là Gì? (Dành Cho Người Mới Bắt Đầu)
 
-* 🔄 **LangGraph Parallel StateGraph Orchestration:**
-  * Khởi tạo đồ thị trạng thái song song 5 luồng thu thập độc lập (`web_search`, `website`, `news`, `registry`, `linkedin`) với cơ chế fan-in chuẩn hóa bằng Zod state annotation.
-  * Giới hạn tối đa 6 câu truy vấn định danh (`buildResearchQueries`) và ngân sách gọi mô hình / token tiền trạm (`createResearchBudget`).
-  * Tự động cô lập bằng chứng không tin cậy bằng thẻ `<UNTRUSTED_SOURCE_DATA>` và áp dụng chính sách ưu tiên theo từng trường dữ liệu (Field-sensitive precedence).
-* 🔭 **Langfuse Cloud Tracing & Privacy Minimization:**
-  * Giám sát toàn diện vòng đời đồ thị qua OpenTelemetry (`@langfuse/otel` & `@langfuse/langchain`).
-  * Tự động làm sạch dữ liệu nhạy cảm (API Keys, Bearer tokens, email cá nhân, số điện thoại, HTML thô) trước khi gửi telemetry ra ngoài.
-  * Tính điểm chất lượng tất định (`source_coverage`, `profile_schema_valid`, `profile_confidence`, `analysis_schema_valid`, `research_success`).
-* 🌐 **Multi-source Research Pipeline (Thu thập đa nguồn thời gian thực):**
-  * 🔍 **Web Search:** Tích hợp Serper Google Search API và chỉ tổng hợp dữ liệu trả về từ nguồn thật.
-  * 🛡️ **Tiered Website Scraper (3 cấp độ tự phục hồi):** Chuỗi fallback `SafeDirect → Jina Reader → TinyFish` với cơ chế chống SSRF (Private IP/Localhost block), DNS Pinning, giới hạn luồng 1MB và bộ lọc HTML tuyến tính an toàn.
-  * 🏛️ **VietQR Official Business Registry:** Tra cứu trực tiếp thông tin doanh nghiệp qua Mã số thuế (MST) với in-memory caching (7 ngày), tự động fallback sang Aggregator Search khi API nghẽn.
-  * 📰 **Tin tức kinh doanh Việt Nam:** Tự động tìm kiếm các bài viết từ CafeF, Báo Đầu tư, VnExpress, Vietstock...
-  * 💼 **Bóc tách LinkedIn / Nhân sự:** Thu thập thông tin ban lãnh đạo và đội ngũ cốt cán (tự động bỏ qua khi không có URL).
-* ⚡ **Real-time SSE Streaming & Edge/Vercel Safe:**
-  * API route tối giản `runtime = "nodejs"` với `maxDuration = 300` và hạn chót nội bộ 285s đảm bảo không bị ngắt quãng giữa chừng.
-  * Hủy bỏ luồng tức thì qua `AbortSignal` khi người dùng ngắt kết nối.
-* 🧠 **OpenAI Structured Profile Builder:** Chuẩn hóa thông tin tự động bằng Zod Schema & Structured Outputs (Strict Mode), tính toán độ tin cậy (`overallConfidence`) theo trọng số từng nguồn.
-* 📊 **Analyst Module & Collaboration Fit Score (0–100):** Đánh giá mức độ phù hợp hợp tác kinh doanh theo 5 tiêu chí chuẩn hóa:
-  * 🏢 **Phù hợp ngành (Industry Alignment - 30%)**
-  * 👥 **Tương thích quy mô (Company Size Match - 20%)**
-  * 📍 **Phù hợp địa lý (Geographic Relevance - 15%)**
-  * 💻 **Trưởng thành số (Digital Maturity - 15%)**
-  * 📈 **Hoạt động gần đây (Recent Activity - 20%)**
-* 🔍 **"What Changed?" Diff Engine:** So sánh tự động giữa các phiên bản hồ sơ của một doanh nghiệp (v1 → v2), nhận diện biến động về nhân sự, địa chỉ, ngành nghề và quy mô.
-* 🗄️ **Multi-Version Storage (Supabase PostgreSQL):** Lưu trữ lịch sử hồ sơ dạng JSONB, tối ưu hóa truy vấn và bảo toàn toàn bộ vết thay đổi.
-* 📑 **Bộ Công Cụ Xuất Bản Báo Cáo Chuyên Nghiệp:**
-  * 📋 **Markdown & JSON Export:** Sao chép vào Clipboard hoặc tải file `.md` / `.json` ngay tức thì.
-  * 📄 **Client-side PDF One-Pager (A4 Portrait):** Tạo báo cáo 1 trang tóm tắt chuẩn doanh nghiệp tiếng Việt có dấu với `@react-pdf/renderer` qua Dynamic Import (Zero Server Overhead, tải font Noto Sans cục bộ, hoạt động offline).
+Khi bạn muốn hợp tác với một đối tác hoặc doanh nghiệp mới, bạn thường mất hàng giờ tìm kiếm thông tin trên Google, tra cứu mã số thuế, đọc tin tức và phân tích rủi ro. **PartnerIQ tự động hóa toàn bộ quy trình này chỉ trong 3 bước đơn giản:**
+
+```text
+ 1. Nhập thông tin       2. AI thu thập & phân tích       3. Nhận báo cáo toàn diện
+┌────────────────┐     ┌────────────────────────────┐     ┌────────────────────────────┐
+│ Tên công ty    │ ──► │ • Quét 5 nguồn độc lập     │ ──► │ • Hồ sơ 360° + Bằng chứng  │
+│ (hoặc MST/Web) │     │ • Xử lý qua LangGraph & AI │     │ • Điểm Fit Score (0-100)   │
+└────────────────┘     │ • Kiểm tra Cache Supabase  │     │ • Tải file PDF 1 trang     │
+                       └────────────────────────────┘     └────────────────────────────┘
+```
 
 ---
 
-## 🏛️ Lược Đồ Kiến Trúc & Class Diagram
+## 🛠️ 5 Trụ Cột Công Nghệ Cốt Lõi (Core Technologies)
 
-### 1. Kiến Trúc Phân Lớp (Hexagonal / Ports & Adapters Architecture)
+| Biểu tượng | Công nghệ | Vai trò & Cách ứng dụng trong hệ thống |
+| :---: | :--- | :--- |
+| 🕸️ | **LangGraph** | **Điều phối luồng công việc (StateGraph Orchestration):** Quản lý trạng thái đa luồng song song (Fan-out / Fan-in) qua 5 nguồn dữ liệu độc lập, kiểm soát hạn mức (Token / Query Budget) và xử lý lỗi mềm. |
+| 🦜🔗 | **LangChain** | **Tương tác chuẩn hóa với LLM:** Sử dụng Zod Schemas để ép kiểu dữ liệu đầu ra nghiêm ngặt (Strict Structured Outputs), quản lý tin nhắn và streaming phản hồi theo thời gian thực. |
+| ⚡ | **Next.js 16 (Turbopack)** | **Fullstack Dashboard & SSE Streaming:** Giao diện người dùng hiện đại, truyền dữ liệu Server-Sent Events (SSE) trực tiếp từ backend tới dashboard với độ trễ thấp. |
+| 🗄️ | **Supabase (PostgreSQL)** | **Lưu trữ & Cache Thông Minh:** Quản lý lịch sử hồ sơ dạng JSONB, hỗ trợ cache read-through với khóa phân tán (`pg_advisory_xact_lock`) chống nghẽn và lưu vết thay đổi đa phiên bản. |
+| 🔭 | **Langfuse Cloud** | **Giám sát & Tối ưu AI (Observability):** Ghi nhận toàn bộ Trace của đồ thị LangGraph, đo lường độ trễ, chi phí token, tự động làm sạch dữ liệu nhạy cảm và chấm điểm chất lượng nghiên cứu. |
 
-Hệ thống tuân thủ nghiêm ngặt nguyên lý **Ports & Adapters**, tách biệt hoàn toàn giữa logic nghiệp vụ lõi (Deep Core Modules) và các dịch vụ bên ngoài (Infrastructure Adapters):
+---
+
+## 🔄 Sơ Đồ Quy Trình Điều Phối (LangGraph StateGraph Workflow)
+
+Dưới đây là sơ đồ chi tiết toàn bộ các **Node** và **Edge** trong đồ thị LangGraph điều phối quá trình nghiên cứu:
 
 ```mermaid
-graph TB
-  subgraph Presentation ["1. Presentation Layer (Next.js App Router)"]
-    UI["Web Dashboard & UI (React, TailwindCSS, Glassmorphism)"]
-    API["API Route: /api/research (Thin Glue & SSE Streaming)"]
-  end
+flowchart TD
+    Start([🚀 Bắt Đầu]) --> InputNode[📥 1. Nhận yêu cầu: Company Input]
+    
+    InputNode --> CacheCheck{🔍 Kiểm tra Cache?}
+    CacheCheck -- Cache Hit --> ReturnCache[⚡ Trả về Snapshot Cache có sẵn]
+    CacheCheck -- Cache Miss / Bypass --> FanOut[🔀 Điều phối song song 5 nguồn]
 
-  subgraph CoreModules ["2. Deep Core Modules (Domain Logic)"]
-    RM["ResearchModule (Multi-source Orchestrator)"]
-    PM["ProfileModule (LLM Structured Builder)"]
-    DE["DiffEngine (Profile Comparison & Change Tracker)"]
-    AM["AnalystModule (Collaboration Fit Score & Risk Engine)"]
-    PDF["PDFExportEngine (Client-side One-Pager Generator)"]
-  end
+    subgraph SourcesGroup [🌐 5 Nguồn Thu Thập Dữ Liệu Độc Lập]
+        direction TB
+        S1["🔍 web_search<br/><i>(Google Search qua Serper API)</i>"]
+        S2["🌐 website<br/><i>(Scraper 3 cấp: Direct ➔ Jina ➔ TinyFish)</i>"]
+        S3["📰 news<br/><i>(Tin tức báo chí CafeF, VnExpress, Vietstock)</i>"]
+        S4["🏛️ registry<br/><i>(Tra cứu Cổng ĐKKD & VietQR theo MST)</i>"]
+        S5["💼 linkedin<br/><i>(Thu thập thông tin nhân sự ban lãnh đạo)</i>"]
+    end
 
-  subgraph Ports ["3. Ports & Seams (Interfaces)"]
-    PortLLM["LLMAdapter"]
-    PortSearch["SearchAdapter"]
-    PortScraper["ScraperAdapter"]
-    PortRegistry["RegistryAdapter"]
-    PortStorage["StorageAdapter"]
-  end
+    FanOut --> S1
+    FanOut --> S2
+    FanOut --> S3
+    FanOut --> S4
+    FanOut --> S5
 
-  subgraph Adapters ["4. Infrastructure Adapters"]
-    OpenAI["OpenAI (gpt-4o-mini)"]
-    Serper["Google Search (Serper API)"]
-    TieredScraper["Tiered Scraper (SafeDirect -> Jina -> TinyFish)"]
-    VietQR["VietQR Business Registry API"]
-    Supabase["Supabase PostgreSQL (JSONB) / Memory"]
-  end
+    S1 --> EvidenceNode[📑 2. prepare_evidence<br/><i>Lọc dữ liệu & Bọc thẻ an toàn</i>]
+    S2 --> EvidenceNode
+    S3 --> EvidenceNode
+    S4 --> EvidenceNode
+    S5 --> EvidenceNode
 
-  UI <-->|SSE Events / JSON| API
-  UI --> PDF
-  API --> RM
-  API --> PM
-  API --> AM
+    EvidenceNode --> ProfileNode[🧠 3. build_profile<br/><i>LLM tổng hợp hồ sơ chuẩn hóa 360°</i>]
+    
+    ProfileNode --> DiffNode[🔄 4. build_diff<br/><i>So sánh thay đổi với phiên bản cũ</i>]
+    
+    DiffNode --> AnalyzeNode[📊 5. analyze<br/><i>Chấm điểm FitScore 0-100 & Rủi ro</i>]
+    
+    AnalyzeNode --> PersistNode[🗄️ 6. persist_snapshot<br/><i>Lưu trữ Snapshot vào Supabase</i>]
+    
+    PersistNode --> StreamOutput[⚡ 7. SSE Streaming & Cập nhật Dashboard]
+    
+    StreamOutput --> PDFExport[📄 8. Xuất Báo Cáo PDF One-Pager A4]
+    
+    ReturnCache --> StreamOutput
+    PDFExport --> End([🏁 Hoàn Thành])
 
-  RM --> PortSearch
-  RM --> PortScraper
-  RM --> PortRegistry
-  PM --> PortLLM
-  PM --> DE
-  AM --> PortLLM
-  API --> PortStorage
+    classDef startEnd fill:#3B82F6,stroke:#1D4ED8,stroke-width:2px,color:#fff;
+    classDef nodeStyle fill:#F3F4F6,stroke:#9CA3AF,stroke-width:1.5px,color:#111827;
+    classDef sourceStyle fill:#ECFDF5,stroke:#10B981,stroke-width:1.5px,color:#065F46;
+    classDef aiStyle fill:#EEF2FF,stroke:#6366F1,stroke-width:1.5px,color:#3730A3;
+    classDef dbStyle fill:#FDF4FF,stroke:#D946EF,stroke-width:1.5px,color:#701A75;
 
-  PortLLM --> OpenAI
-  PortSearch --> Serper
-  PortScraper --> TieredScraper
-  PortRegistry --> VietQR
-  PortStorage --> Supabase
+    class Start,End startEnd;
+    class InputNode,EvidenceNode,StreamOutput,PDFExport,ReturnCache nodeStyle;
+    class S1,S2,S3,S4,S5 sourceStyle;
+    class ProfileNode,DiffNode,AnalyzeNode aiStyle;
+    class PersistNode dbStyle;
 ```
 
 ---
 
-### 2. Lược Đồ Class - Domain Entities & Models (Class Diagram 1)
+## 🌟 5 Nguồn Dữ Liệu Hoạt Động Như Thế Nào?
 
-Lược đồ mô tả toàn bộ cấu trúc dữ liệu miền (Domain Models) được định kiểu chặt chẽ trong hệ thống:
-
-```mermaid
-classDiagram
-  direction TB
-
-  class CompanyInput {
-    +string name
-    +string website
-    +string taxId
-    +string linkedinUrl
-    +string[] additionalKeywords
-  }
-
-  class RawFinding {
-    +SourceName source
-    +string url
-    +string content
-    +Date extractedAt
-    +number confidence
-    +Record metadata
-  }
-
-  class CompanyProfile {
-    +string id
-    +number version
-    +Date createdAt
-    +CompanyInput input
-    +string officialName
-    +string[] tradingNames
-    +string taxId
-    +string[] industry
-    +string description
-    +number foundedYear
-    +Address headquarters
-    +string website
-    +Person[] keyPeople
-    +string[] products
-    +string[] markets
-    +CompanySize companySize
-    +RevenueRange revenue
-    +Activity[] recentActivities
-    +Date lastUpdated
-    +SourceCitation[] sources
-    +number overallConfidence
-    +boolean lowConfidence
-  }
-
-  class Address {
-    +string street
-    +string city
-    +string province
-    +string country
-  }
-
-  class Person {
-    +string name
-    +string title
-    +SourceName source
-    +number confidence
-  }
-
-  class Activity {
-    +Date date
-    +string title
-    +string summary
-    +string url
-    +SourceName source
-  }
-
-  class SourceCitation {
-    +SourceName source
-    +string url
-    +Date accessedAt
-    +string[] fieldsContributed
-  }
-
-  class ProfileDiff {
-    +string companyId
-    +number fromVersion
-    +number toVersion
-    +FieldChange[] changes
-    +string summary
-  }
-
-  class FieldChange {
-    +string field
-    +unknown oldValue
-    +unknown newValue
-    +string changeType
-    +string significance
-  }
-
-  class AnalysisReport {
-    +string companyId
-    +Date generatedAt
-    +FitScore fitScore
-    +RiskFlag[] riskFlags
-    +SuggestedAction[] suggestedActions
-    +string executiveSummary
-  }
-
-  class FitScore {
-    +number score
-    +string reasoning
-    +FitCriterion[] criteria
-  }
-
-  class FitCriterion {
-    +string name
-    +number score
-    +number weight
-    +string reasoning
-  }
-
-  class RiskFlag {
-    +string type
-    +string description
-    +string severity
-    +SourceName source
-  }
-
-  class SuggestedAction {
-    +string action
-    +string priority
-    +string reasoning
-  }
-
-  class PdfPayload {
-    +string companyName
-    +string taxId
-    +string[] industries
-    +string description
-    +number fitScore
-    +string fitReason
-    +PdfCriterion[] criteria
-    +string executiveSummary
-    +string[] risks
-    +string[] actions
-    +SourceItem[] sources
-    +string generatedAt
-  }
-
-  CompanyProfile *-- CompanyInput : contains
-  CompanyProfile *-- Address : headquarters
-  CompanyProfile o-- Person : keyPeople
-  CompanyProfile o-- Activity : recentActivities
-  CompanyProfile o-- SourceCitation : sources
-  ProfileDiff o-- FieldChange : changes
-  AnalysisReport *-- FitScore : contains
-  FitScore o-- FitCriterion : criteria
-  AnalysisReport o-- RiskFlag : riskFlags
-  AnalysisReport o-- SuggestedAction : suggestedActions
-  CompanyProfile ..> PdfPayload : maps to
-  AnalysisReport ..> PdfPayload : maps to
-```
+1. **🔍 Tìm kiếm web (`web_search`):** Sử dụng Serper Google Search API để tìm kiếm các bài viết, hồ sơ doanh nghiệp mới nhất trên Internet.
+2. **🌐 Website công ty (`website`):** Trích xuất nội dung trang chủ và các trang giới thiệu (`/about`, `/products`), tự động bảo vệ trước các liên kết độc hại qua cơ chế **Safe Tiered Scraper (Direct ➔ Jina Reader ➔ TinyFish)**.
+3. **📰 Tin tức truyền thông (`news`):** Quét các trang báo chí tài chính hàng đầu (CafeF, VnExpress, Vietstock, Báo Đầu tư) để phát hiện sự kiện nổi bật và dấu hiệu rủi ro.
+4. **🏛️ Đăng ký kinh doanh (`registry`):** Tra cứu dữ liệu định danh pháp lý chính thức từ Cổng đăng ký doanh nghiệp quốc gia và VietQR qua Mã số thuế.
+5. **💼 Mạng lưới nhân sự (`linkedin`):** Khám phá cấu trúc lãnh đạo, nhân sự cốt cán và quy mô đội ngũ.
 
 ---
 
-### 3. Lược Đồ Class - Deep Modules & Infrastructure Ports/Adapters (Class Diagram 2)
+## 📊 Tiêu Chí Đánh Giá Điểm Hợp Tác (Collaboration Fit Score 0–100)
 
-Lược đồ mô tả các Interface (Ports), các Deep Modules và các Concrete Adapters thực thi:
+Hệ thống chấm điểm doanh nghiệp dựa trên **5 tiêu chí chuẩn hóa**:
 
-```mermaid
-classDiagram
-  direction TB
+* 🏢 **Phù hợp ngành nghề (Industry Alignment - 30%):** Đánh giá sự tương đồng trong lĩnh vực hoạt động.
+* 👥 **Tương thích quy mô (Company Size Match - 20%):** Đánh giá năng lực tiếp nhận và quy mô nhân sự.
+* 📍 **Vị trí địa lý (Geographic Relevance - 15%):** Khả năng triển khai thuận lợi theo vùng miền.
+* 💻 **Mức độ số hóa (Digital Maturity - 15%):** Đánh giá mức độ ứng dụng công nghệ và hiện diện trực tuyến.
+* 📈 **Hoạt động gần đây (Recent Activity - 20%):** Các dự án mới, sự kiện mở rộng hoặc phát triển trong 6–12 tháng qua.
 
-  %% Ports (Interfaces)
-  class LLMAdapter {
-    <<interface>>
-    +complete(prompt: string, options?: LLMOptions) Promise~string~
-    +completeStructured~T~(prompt: string, schema: ZodSchema~T~, options?: LLMOptions) Promise~T~
-    +stream(prompt: string, options?: LLMOptions) AsyncGenerator~string~
-  }
-
-  class SearchAdapter {
-    <<interface>>
-    +search(query: string, options?: SearchOptions) Promise~SearchResult[]~
-  }
-
-  class ScraperAdapter {
-    <<interface>>
-    +extract(url: string) Promise~ScrapedContent~
-  }
-
-  class RegistryAdapter {
-    <<interface>>
-    +findByTaxId(taxId: string) Promise~RegistryRecord | null~
-  }
-
-  class StorageAdapter {
-    <<interface>>
-    +saveProfile(profile: CompanyProfile) Promise~void~
-    +getProfile(companyId: string, version?: number) Promise~CompanyProfile | null~
-    +getLatestProfile(companyId: string) Promise~CompanyProfile | null~
-    +listProfiles() Promise~CompanyProfile[]~
-    +saveDiff(diff: ProfileDiff) Promise~void~
-    +getDiffs(companyId: string) Promise~ProfileDiff[]~
-  }
-
-  %% Deep Modules
-  class ResearchModule {
-    <<interface>>
-    +research(input: CompanyInput) AsyncGenerator~ResearchEvent~
-  }
-
-  class ProfileModule {
-    <<interface>>
-    +buildProfile(findings: RawFinding[], input: CompanyInput, existingId?: string, existingVersion?: number) Promise~CompanyProfile~
-    +diffProfiles(current: CompanyProfile, previous: CompanyProfile) ProfileDiff
-  }
-
-  class AnalystModule {
-    <<interface>>
-    +analyze(profile: CompanyProfile, context?: AnalysisContext) Promise~AnalysisReport~
-  }
-
-  %% Concrete Adapters
-  class OpenAILLMAdapter {
-    -OpenAI client
-    +complete()
-    +completeStructured()
-    +stream()
-  }
-
-  class SerperSearchAdapter {
-    -string apiKey
-    +search()
-  }
-
-  class TieredScraperAdapter {
-    -ScraperAdapter[] tiers
-    +extract(url: string) Promise~ScrapedContent~
-  }
-
-  class DirectScraperAdapter {
-    -UrlSafetyValidator validator
-    -number timeoutMs
-    -number maxBytes
-    +extract(url: string) Promise~ScrapedContent~
-  }
-
-  class JinaScraperAdapter {
-    -string apiKey
-    +extract(url: string) Promise~ScrapedContent~
-  }
-
-  class TinyFishScraperAdapter {
-    -string apiKey
-    +extract(url: string) Promise~ScrapedContent~
-  }
-
-  class VietQrRegistryAdapter {
-    -Map cache
-    -number ttlMs
-    +findByTaxId(taxId: string) Promise~RegistryRecord | null~
-  }
-
-  class SupabaseStorageAdapter {
-    -SupabaseClient client
-    +saveProfile()
-    +getProfile()
-    +getLatestProfile()
-    +saveDiff()
-  }
-
-  class MemoryStorageAdapter {
-    -Map profiles
-    -Map diffs
-    +saveProfile()
-    +getProfile()
-  }
-
-  %% Relationships & Implementations
-  LLMAdapter <|.. OpenAILLMAdapter : implements
-  SearchAdapter <|.. SerperSearchAdapter : implements
-
-  ScraperAdapter <|.. TieredScraperAdapter : implements
-  ScraperAdapter <|.. DirectScraperAdapter : implements
-  ScraperAdapter <|.. JinaScraperAdapter : implements
-  ScraperAdapter <|.. TinyFishScraperAdapter : implements
-  TieredScraperAdapter o-- ScraperAdapter : contains fallback tiers
-
-  RegistryAdapter <|.. VietQrRegistryAdapter : implements
-
-  StorageAdapter <|.. SupabaseStorageAdapter : implements
-  StorageAdapter <|.. MemoryStorageAdapter : implements
-
-  ResearchModule ..> SearchAdapter : uses
-  ResearchModule ..> ScraperAdapter : uses
-  ResearchModule ..> RegistryAdapter : uses
-  ProfileModule ..> LLMAdapter : uses
-  AnalystModule ..> LLMAdapter : uses
-```
+> **Tính năng Bằng chứng thực tế (Real-world Evidence):** Người dùng có thể click vào bất kỳ thẻ thông tin nào trên giao diện (Tiêu chí FitScore, Rủi ro, Nhân sự, Mã số thuế, Trụ sở...) để mở tab mới kiểm chứng ngay dữ liệu từ nguồn gốc!
 
 ---
 
-### 4. Sequence Diagram - Luồng Xử Lý Dữ Liệu Thời Gian Thực (Data Flow & Streaming)
+## 🚀 Hướng Dẫn Cài Đặt & Chạy Nhanh (Quick Start)
 
-```mermaid
-sequenceDiagram
-  autonumber
-  actor User as 👤 Người Dùng
-  participant UI as 💻 Next.js Client
-  participant API as ⚡ API Route (/api/research)
-  participant RM as 🔍 ResearchModule
-  participant Sources as 🌐 5 Data Sources
-  participant PM as 🧠 ProfileModule (LLM)
-  participant AM as 📊 AnalystModule (Fit Score)
-  participant DB as 🗄️ Supabase Storage
-  participant PDF as 📑 PDF Engine (Client)
-
-  User->>UI: Nhập tên công ty / website / MST
-  UI->>API: POST /api/research (SSE Request)
-  API-->>UI: Event: research:start
-  
-  API->>RM: research(input)
-  loop Duyệt qua 5 nguồn dữ liệu
-    RM->>Sources: Tìm kiếm (Web, Scraper, VietQR, News, LinkedIn)
-    Sources-->>RM: Trả về dữ liệu thô (RawFinding)
-    RM-->>API: Yield: progress & finding
-    API-->>UI: SSE: research:progress & finding
-  end
-  RM-->>API: Complete (all findings)
-
-  API-->>UI: Event: profile:building
-  API->>PM: buildProfile(findings, input)
-  PM-->>API: CompanyProfile (Structured)
-  API->>DB: getLatestProfile(companyId)
-  DB-->>API: Previous Profile (nếu có)
-  opt Có phiên bản trước
-    API->>PM: diffProfiles(current, previous)
-    PM-->>API: ProfileDiff
-    API->>DB: saveDiff(diff)
-  end
-
-  API->>AM: analyze(profile, context)
-  AM-->>API: AnalysisReport (FitScore 0-100, Risks, Actions)
-
-  API->>DB: saveProfile(profile)
-  API-->>UI: Event: profile:ready & analysis:ready & done
-  UI-->>User: Hiển thị giao diện Dashboard & Fit Score
-
-  opt Người dùng click Xuất PDF
-    User->>UI: Bấm "Xuất PDF One-Pager"
-    UI->>PDF: mapToPdfPayload & renderAsync()
-    PDF-->>User: Tải xuống PartnerIQ_CompanyName_YYYY-MM-DD.pdf (A4)
-  end
-```
-
----
-
-## ⚙️ Cấu Hình & Biến Môi Trường (Configuration & Resilience)
-
-### File `.env.local` mẫu
-
-```dotenv
-# ─── LLM Provider ───
-LLM_PROVIDER=openai
-OPENAI_API_KEY=sk-...
-
-# ─── Search Provider ───
-SEARCH_PROVIDER=serper
-SERPER_API_KEY=...
-
-# ─── Scraper Provider & Fallback Chain ───
-SCRAPER_PROVIDER=tiered           # tiered | tinyfish
-SCRAPER_DIRECT_ENABLED=true       # Tier 1: Direct HTTP scraper + SSRF Guard
-SCRAPER_JINA_ENABLED=true         # Tier 2: Jina AI Reader
-SCRAPER_TINYFISH_ENABLED=true     # Tier 3: TinyFish API
-JINA_API_KEY=
-TINYFISH_API_KEY=
-SCRAPER_TIMEOUT_MS=8000
-SCRAPER_MAX_RESPONSE_BYTES=1048576 # Giới hạn stream 1MB
-SCRAPER_MAX_REDIRECTS=3
-MAX_SCRAPE_PAGES_PER_RESEARCH=5
-
-# ─── Registry Provider (VietQR) ───
-VIETQR_ENABLED=true               # Tra cứu MST chính thức với 7-day memory cache
-
-# ─── Storage Provider (supabase | memory) ───
-STORAGE_PROVIDER=supabase
-SUPABASE_URL=https://xyz.supabase.co
-SUPABASE_ANON_KEY=eyJ...
-
-# ─── Resource & Rate Limit Guards ───
-MAX_CONCURRENT_RESEARCH=1
-SOURCE_TIMEOUT_MS=30000
-MAX_RESEARCH_PER_DAY=50
-MAX_TOKENS_PER_DAY=500000
-```
-
-### Cơ Chế Fallback & Tự Phục Hồi (Circuit Breakers)
-
-| Tình huống sự cố | Cơ chế tự động xử lý | Trạng thái hệ thống |
-| :--- | :--- | :--- |
-| **Direct Scraper bị chặn / WAF** | Tự động chuyển tier sang **Jina Reader → TinyFish** | Không gián đoạn |
-| **Jina Reader 429 (Rate Limit)** | Bỏ qua Jina, fallback tức thì sang **TinyFish** | Không gián đoạn |
-| **Thiếu API Key Jina/TinyFish** | Tự động bypass tier thiếu key mà không gây lỗi runtime | Tự thích ứng |
-| **Target URL là Local IP / Private** | Chặn ngay tại `UrlSafetyValidator` (SSRF Protection) | An toàn tuyệt đối |
-| **VietQR API quá tải / lỗi mạng** | Fallback sang tra cứu qua **Aggregator & Google Search** | Bền bỉ |
-| **Supabase không khả dụng** | Fallback sang **In-Memory Storage** cho môi trường dev/test | Sẵn sàng chạy offline |
-
----
-
-## 🛠️ Cài Đặt & Khởi Chạy Nhanh (Getting Started)
-
-### 1. Yêu cầu môi trường
-* **Node.js**: Phiên bản `>= 18.17.0` (khuyến nghị Node 20 LTS hoặc 24).
-* **Trình quản lý gói**: `npm` hoặc `pnpm`.
+### 1. Yêu cầu hệ thống
+* **Node.js**: Phiên bản `>= 18.17.0` (khuyến nghị Node 20 LTS hoặc Node 24).
+* **NPM / PNPM**.
 
 ### 2. Cài đặt các gói phụ thuộc
 ```bash
@@ -543,18 +156,47 @@ Tạo file `.env.local` từ file mẫu:
 ```bash
 cp .env.example .env.local
 ```
-*(Điền các API Key cần thiết như `OPENAI_API_KEY`, `SERPER_API_KEY`, `SUPABASE_URL`,...)*
 
-### 4. Khởi chạy máy chủ phát triển
+Điền các khóa API cơ bản:
+```dotenv
+# LLM Provider
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+
+# Search Provider
+SEARCH_PROVIDER=serper
+SERPER_API_KEY=...
+
+# Storage (Supabase hoặc Memory)
+STORAGE_PROVIDER=supabase
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=eyJ...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
+
+# Langfuse Observability (Tùy chọn)
+LANGFUSE_ENABLED=true
+LANGFUSE_PUBLIC_KEY=pk-...
+LANGFUSE_SECRET_KEY=sk-...
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+```
+
+### 4. Khởi chạy ứng dụng
 ```bash
 npm run dev
 ```
-Mở trình duyệt và truy cập [http://localhost:3000](http://localhost:3000).
+Truy cập [http://localhost:3000](http://localhost:3000) trên trình duyệt để sử dụng.
+
+### 5. Kiểm thử hệ thống
+```bash
+npm run test        # Chạy toàn bộ 27 test suites với Vitest
+npm run lint        # Kiểm tra chuẩn mã nguồn ESLint
+npm run typecheck   # Kiểm tra kiểu TypeScript
+npm run build       # Biên dịch production build với Turbopack
+```
 
 ---
 
+## 📄 Giấy Phép & Bản Quyền (License)
 
-## 📄 Bản Quyền & Giấy Phép (License)
-
-Dự án được phân phối dưới giấy phép **[MIT License](LICENSE)**.
-Phát triển bởi đội ngũ **PartnerIQ / TechBridgeAI** tham dự **Google AI Hackathon 2026**.
+Dự án được phân phối dưới giấy phép **[MIT License](LICENSE)**.  
+Phát triển bởi đội ngũ **PartnerIQ / TechBridgeAI**.
