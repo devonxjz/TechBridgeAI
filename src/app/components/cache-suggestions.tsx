@@ -16,16 +16,19 @@ export function CacheSuggestions({
   if (!suggestions || suggestions.length === 0) return null;
 
   return (
-    <div
+    <section
       className="glass-card p-6 space-y-4 animate-fade-in"
       data-testid="cache-suggestions"
+      role="region"
+      aria-label="Danh sách gợi ý bộ nhớ đệm"
+      aria-describedby="cache-suggestions-desc"
     >
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
-            <span>⚡</span> Tìm thấy kết quả trong bộ nhớ đệm
+            <span aria-hidden="true">⚡</span> Tìm thấy kết quả trong bộ nhớ đệm
           </h3>
-          <p className="text-xs text-muted mt-1">
+          <p id="cache-suggestions-desc" className="text-xs text-muted mt-1">
             Chọn một hồ sơ có sẵn để tải ngay dữ liệu hoặc tiếp tục nghiên cứu mới
             toàn diện.
           </p>
@@ -77,9 +80,9 @@ export function CacheSuggestions({
           className="btn-secondary text-xs px-4 py-2 flex items-center gap-2"
           data-testid="bypass-button"
         >
-          <span>🔍</span> Nghiên cứu mới (Bỏ qua cache)
+          <span aria-hidden="true">🔍</span> Nghiên cứu mới (Bỏ qua cache)
         </button>
       </div>
-    </div>
+    </section>
   );
 }

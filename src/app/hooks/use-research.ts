@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type {
   CompanyInput,
   CompanyProfile,
@@ -262,6 +262,12 @@ export function useResearch() {
   const reset = useCallback(() => {
     abortRef.current?.abort();
     setState(INITIAL_STATE);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
   }, []);
 
   return {
