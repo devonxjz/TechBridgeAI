@@ -28,14 +28,9 @@
 
 Khi bạn muốn hợp tác với một đối tác hoặc doanh nghiệp mới, bạn thường mất hàng giờ tìm kiếm thông tin trên Google, tra cứu mã số thuế, đọc tin tức và phân tích rủi ro. **PartnerIQ tự động hóa toàn bộ quy trình này chỉ trong 3 bước đơn giản:**
 
-```text
- 1. Nhập thông tin       2. AI thu thập & phân tích       3. Nhận báo cáo toàn diện
-┌────────────────┐     ┌────────────────────────────┐     ┌────────────────────────────┐
-│ Tên công ty    │ ──► │ • Quét 5 nguồn độc lập     │ ──► │ • Hồ sơ 360° + Bằng chứng  │
-│ (hoặc MST/Web) │     │ • Xử lý qua LangGraph & AI │     │ • Điểm Fit Score (0-100)   │
-└────────────────┘     │ • Kiểm tra Cache Supabase  │     │ • Tải file PDF 1 trang     │
-                       └────────────────────────────┘     └────────────────────────────┘
-```
+1. **📥 Bước 1 — Nhập thông tin**: Nhập tên công ty, mã số thuế (MST) hoặc website doanh nghiệp.
+2. **🧠 Bước 2 — AI tự động thu thập & phân tích**: Quét 5 nguồn dữ liệu độc lập, lọc bằng chứng, kiểm tra cache Supabase và tổng hợp hồ sơ qua mô hình AI.
+3. **📊 Bước 3 — Nhận báo cáo toàn diện**: Xem hồ sơ 360° có dẫn chứng nguồn gốc, điểm tiềm năng hợp tác (Fit Score 0–100) và xuất file PDF 1 trang tức thì.
 
 ---
 
@@ -54,65 +49,6 @@ Khi bạn muốn hợp tác với một đối tác hoặc doanh nghiệp mới,
   <img src="./public/workflow-diagram-light.png" alt="PartnerIQ LangGraph Workflow" width="100%" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.08);" />
   <p><em>Quy trình xử lý dữ liệu qua các Node trong đồ thị LangGraph StateGraph — Tối ưu hóa thu thập song song và tổng hợp AI.</em></p>
 </div>
-
-Dưới đây là chi tiết luồng điều phối qua các Node và Edge:
-
-```mermaid
-flowchart TD
-    Start([🚀 Bắt Đầu]) --> InputNode[📥 1. Nhận yêu cầu: Company Input]
-    
-    InputNode --> CacheCheck{🔍 Kiểm tra Cache?}
-    CacheCheck -- Cache Hit --> ReturnCache[⚡ Trả về Snapshot Cache có sẵn]
-    CacheCheck -- Cache Miss / Bypass --> FanOut[🔀 Điều phối song song 5 nguồn]
-
-    subgraph SourcesGroup [🌐 5 Nguồn Thu Thập Dữ Liệu Độc Lập]
-        direction TB
-        S1["🔍 web_search<br/><i>(Google Search qua Serper API)</i>"]
-        S2["🌐 website<br/><i>(Scraper 3 cấp: Direct ➔ Jina ➔ TinyFish)</i>"]
-        S3["📰 news<br/><i>(Tin tức báo chí CafeF, VnExpress, Vietstock)</i>"]
-        S4["🏛️ registry<br/><i>(Tra cứu Cổng ĐKKD & VietQR theo MST)</i>"]
-        S5["💼 linkedin<br/><i>(Thu thập thông tin nhân sự ban lãnh đạo)</i>"]
-    end
-
-    FanOut --> S1
-    FanOut --> S2
-    FanOut --> S3
-    FanOut --> S4
-    FanOut --> S5
-
-    S1 --> EvidenceNode[📑 2. prepare_evidence<br/><i>Lọc dữ liệu & Bọc thẻ an toàn</i>]
-    S2 --> EvidenceNode
-    S3 --> EvidenceNode
-    S4 --> EvidenceNode
-    S5 --> EvidenceNode
-
-    EvidenceNode --> ProfileNode[🧠 3. build_profile<br/><i>LLM tổng hợp hồ sơ chuẩn hóa 360°</i>]
-    
-    ProfileNode --> DiffNode[🔄 4. build_diff<br/><i>So sánh thay đổi với phiên bản cũ</i>]
-    
-    DiffNode --> AnalyzeNode[📊 5. analyze<br/><i>Chấm điểm FitScore 0-100 & Rủi ro</i>]
-    
-    AnalyzeNode --> PersistNode[🗄️ 6. persist_snapshot<br/><i>Lưu trữ Snapshot vào Supabase</i>]
-    
-    PersistNode --> StreamOutput[⚡ 7. SSE Streaming & Cập nhật Dashboard]
-    
-    StreamOutput --> PDFExport[📄 8. Xuất Báo Cáo PDF One-Pager A4]
-    
-    ReturnCache --> StreamOutput
-    PDFExport --> End([🏁 Hoàn Thành])
-
-    classDef startEnd fill:#3B82F6,stroke:#1D4ED8,stroke-width:2px,color:#fff;
-    classDef nodeStyle fill:#F3F4F6,stroke:#9CA3AF,stroke-width:1.5px,color:#111827;
-    classDef sourceStyle fill:#ECFDF5,stroke:#10B981,stroke-width:1.5px,color:#065F46;
-    classDef aiStyle fill:#EEF2FF,stroke:#6366F1,stroke-width:1.5px,color:#3730A3;
-    classDef dbStyle fill:#FDF4FF,stroke:#D946EF,stroke-width:1.5px,color:#701A75;
-
-    class Start,End startEnd;
-    class InputNode,EvidenceNode,StreamOutput,PDFExport,ReturnCache nodeStyle;
-    class S1,S2,S3,S4,S5 sourceStyle;
-    class ProfileNode,DiffNode,AnalyzeNode aiStyle;
-    class PersistNode dbStyle;
-```
 
 ---
 
