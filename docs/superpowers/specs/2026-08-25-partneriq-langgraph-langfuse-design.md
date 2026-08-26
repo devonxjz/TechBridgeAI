@@ -105,9 +105,10 @@ interface ResearchWorkflowState {
 }
 ```
 
-`sourceResults` and `findings` use append reducers because parallel nodes may
-update them in any completion order. Downstream code never consumes reducer
-order directly; `prepare_evidence` produces deterministic order first.
+`sourceResults` uses an append reducer because parallel nodes may update it in
+any completion order. Source nodes do not also write `findings`; that would
+duplicate the same evidence. `prepare_evidence` derives and overwrites the
+single deterministic `findings` array consumed downstream.
 
 ## Graph nodes and edges
 
@@ -214,8 +215,9 @@ and run behind a feature flag. `Send` is introduced only with that feature.
 
 ## Resource and failure policy
 
-- One global run deadline is lower than the configured Vercel `maxDuration` so
-  the graph can emit a terminal SSE event and flush Langfuse before termination.
+- Configure Vercel `maxDuration = 300` seconds and enforce an internal
+  285-second run deadline so the graph retains 15 seconds to emit a terminal
+  SSE event, close the writer, and flush Langfuse.
 - Each source has an explicit timeout and a provider concurrency limit.
 - Retry only transient timeout, 429, 5xx, and network-reset failures.
 - Authentication, invalid URL, blocked target, schema, and empty-result errors
@@ -294,10 +296,10 @@ workflow is considered complete. It is not shut down per request.
 ## Vercel and SSE behavior
 
 - The route explicitly uses the Node.js runtime.
-- `maxDuration` is configured in the route and must stay within the active
-  Vercel plan.
-- The internal run deadline reserves time for `done`/`error`, writer close, and
-  Langfuse flush.
+- The route exports `maxDuration = 300`, which stays within the current Vercel
+  Fluid Compute maximum across plans.
+- The internal run deadline is 285 seconds and reserves 15 seconds for
+  `done`/`error`, writer close, and Langfuse flush.
 - The graph stream is consumed for the lifetime of the SSE response; no detached
   background queue is introduced.
 - The writer closes exactly once on success, fatal error, or abort.

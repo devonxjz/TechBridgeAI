@@ -73,3 +73,34 @@
 - [x] S6.3: Demo company matrix measured smoke benchmarks in `README.md` and `docs/plan/DEMO_SCRIPT.md`
 
 **Final Status**: All Sprints Completed & Verified (102/102 Tests Passed + Build Clean + Lint Clean + Types Clean) 🚀
+
+---
+
+## Task 3: LangGraph Orchestration & Langfuse Cloud (TASK-3) ✅ COMPLETE
+
+### Wave 1: Runtime foundation ✅ COMPLETE
+- [x] T3.1: Pin LangGraph/LangChain/Langfuse/OTel dependencies and prove Next.js + Zod + TypeScript compatibility
+
+### Wave 2: Independent foundations ✅ COMPLETE
+- [x] T3.2: Deterministic evidence, bounded query matrix, call/token/concurrency budgets
+- [x] T3.3: LangChain-backed `LLMAdapter` with existing structured-output contract
+
+### Wave 3: Workflow orchestration ✅ COMPLETE
+- [x] T3.4: Parallel LangGraph fan-out/fan-in with typed partial failure
+
+### Wave 4: Independent integration paths ✅ COMPLETE
+- [x] T3.5: Untrusted-evidence prompt boundary and source-priority policy
+- [x] T3.6: Thin SSE route, Vercel runtime deadline, and cancellation propagation
+
+### Wave 5: Observability ✅ COMPLETE
+- [x] T3.7: Langfuse Cloud tracing, masking, deterministic scores, and flush lifecycle
+
+### Wave 6: Release gate ✅ COMPLETE
+- [x] T3.8: Full regression, parallelism benchmark, preview privacy check, and operational documentation
+
+**Branch:** `codex/partneriq-langgraph-langfuse`
+
+**Detailed tickets:** [`docs/ticket/TASK-3.md`](TASK-3.md)
+
+**Final Status**: All Waves Completed & Verified (23 Suites | 136/136 Tests Passed + Build Clean + Lint Clean + Types Clean) 🚀
+

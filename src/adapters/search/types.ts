@@ -6,6 +6,7 @@ export interface SearchOptions {
   maxResults?: number;
   language?: string;
   region?: string;
+  signal?: AbortSignal;
 }
 
 export interface SearchResult {

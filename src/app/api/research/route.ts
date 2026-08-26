@@ -1,11 +1,11 @@
 // ═══════════════════════════════════════════════════════
 // API Route — Research Endpoint (SSE Streaming)
-// Thin orchestration: pipes ResearchModule → ProfileModule → Storage
+// Thin adapter: passes request to LangGraph ResearchWorkflow and streams events
 // ═══════════════════════════════════════════════════════
 
 import { NextRequest } from "next/server";
-import { CompanyInputSchema, slugify } from "@/lib/types";
-import type { StreamEvent, RawFinding } from "@/lib/types";
+import { CompanyInputSchema } from "@/lib/types";
+import type { StreamEvent } from "@/lib/types";
 import { createSSEStream } from "@/lib/stream";
 import {
   createLLMAdapter,
@@ -15,9 +15,22 @@ import {
   createStorageAdapter,
   getGuards,
 } from "@/config";
-import { createResearchModule } from "@/modules/research";
 import { createProfileModule } from "@/modules/profile";
 import { createAnalystModule } from "@/modules/analyst";
+import { createResearchWorkflow } from "@/modules/workflow";
+import {
+  createLangfuseCallback,
+  emitResearchScores,
+  flushLangfuse,
+  traceResearch,
+  type ResearchTraceContext,
+  updateResearchObservationOutcome,
+  updateResearchTraceOutcome,
+} from "@/observability/langfuse";
+import { slugify, type SourceName } from "@/lib/types";
+
+export const runtime = "nodejs";
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   try {
@@ -31,142 +44,90 @@ export async function POST(req: NextRequest) {
     const registry = createRegistryAdapter();
     const storage = createStorageAdapter();
 
-    const researchModule = createResearchModule({
-      llm,
+    const profile = createProfileModule({ llm });
+    const analyst = createAnalystModule({ llm });
+
+    const workflow = createResearchWorkflow({
       search,
       scraper,
       registry,
+      storage,
+      profile,
+      analyst,
       guards,
     });
-    const profileModule = createProfileModule({ llm });
-    const analystModule = createAnalystModule({ llm });
 
     const { stream, writer } = createSSEStream();
+    const researchRunId = crypto.randomUUID();
+    const companyId = slugify(input.name);
 
-    // Run pipeline in background, stream events
-    (async () => {
+    const traceContext: ResearchTraceContext = {
+      researchRunId,
+      companyId,
+      requestedSources: [
+        "web_search",
+        "website",
+        "news",
+        "registry",
+        ...(input.linkedinUrl ? ["linkedin" as SourceName] : []),
+      ],
+    };
+    const langfuseCallback = createLangfuseCallback(traceContext);
+
+    // Setup cancellation & 285s internal deadline
+    const controller = new AbortController();
+    const onReqAbort = () => controller.abort();
+    req.signal.addEventListener("abort", onReqAbort);
+    const deadlineTimeout = setTimeout(() => {
+      controller.abort("Research deadline exceeded (285s)");
+    }, 285_000);
+
+    void (async () => {
       try {
-        const allFindings: RawFinding[] = [];
-        const sourceErrors: string[] = [];
-
-        // Determine active sources
-        const sources = ["web_search", "website", "news", "registry"];
-        if (input.linkedinUrl) sources.push("linkedin");
-
-        writer.write({
-          event: "research:start",
-          data: { sources: sources as StreamEvent extends { event: "research:start" } ? StreamEvent["data"]["sources"] : never },
-        } as StreamEvent);
-
-        // 1. Research — stream progress
-        for await (const event of researchModule.research(input)) {
-          switch (event.type) {
-            case "progress":
-              writer.write({
-                event: "research:progress",
-                data: { source: event.source, status: event.status },
-              } as StreamEvent);
-              break;
-            case "finding":
-              allFindings.push(event.finding);
-              writer.write({
-                event: "research:finding",
-                data: {
-                  source: event.finding.source,
-                  summary: event.finding.content.slice(0, 200),
-                },
-              } as StreamEvent);
-              break;
-            case "error":
-              sourceErrors.push(`${event.source}: ${event.error}`);
-              writer.write({
-                event: "error",
-                data: { message: event.error, source: event.source },
-              } as StreamEvent);
-              break;
+        await traceResearch(traceContext, async (traceId) => {
+          try {
+            for await (const event of workflow.stream(input, {
+              researchRunId,
+              signal: controller.signal,
+              callbacks: langfuseCallback ? [langfuseCallback] : undefined,
+              onComplete: async (state) => {
+                updateResearchTraceOutcome(state);
+                await emitResearchScores(traceId, {
+                  sourceResults: state.sourceResults,
+                  hasProfile: Boolean(state.profile),
+                  hasAnalysis: Boolean(state.report),
+                  overallConfidence: state.profile?.overallConfidence ?? 0,
+                  outcome:
+                    state.outcome === "running" ? "failed" : state.outcome,
+                });
+              },
+            })) {
+              writer.write(event);
+            }
+          } catch (err) {
+            const message =
+              err instanceof Error ? err.message : "Internal workflow error";
+            updateResearchObservationOutcome(
+              controller.signal.aborted ? "cancelled" : "failed",
+            );
+            await emitResearchScores(traceId, {
+              sourceResults: [],
+              hasProfile: false,
+              hasAnalysis: false,
+              overallConfidence: 0,
+              outcome: "failed",
+            });
+            writer.write({
+              event: "error",
+              data: { message },
+            } as StreamEvent);
+            writer.write({ event: "done", data: {} } as StreamEvent);
           }
-        }
-
-        if (allFindings.length === 0) {
-          const detail = sourceErrors.length > 0
-            ? ` Chi tiết: ${sourceErrors.join(" | ")}`
-            : "";
-          writer.write({
-            event: "error",
-            data: {
-              message: `Không tìm thấy thông tin nào về công ty này.${detail}`,
-            },
-          } as StreamEvent);
-          writer.write({ event: "done", data: {} } as StreamEvent);
-          writer.close();
-          return;
-        }
-
-        // 2. Build profile
-        writer.write({
-          event: "profile:building",
-          data: { message: "Đang tổng hợp hồ sơ công ty..." },
-        } as StreamEvent);
-
-        const companyId = slugify(input.name);
-        const existingProfile = await storage.getLatestProfile(companyId);
-        const profile = await profileModule.buildProfile(
-          allFindings,
-          input,
-          existingProfile?.id ?? companyId,
-          existingProfile?.version
-        );
-
-        await storage.saveProfile(profile);
-
-        writer.write({
-          event: "profile:ready",
-          data: { profile },
-        } as StreamEvent);
-
-        // 3. Diff if previous version exists
-        if (existingProfile) {
-          const diff = profileModule.diffProfiles(profile, existingProfile);
-          await storage.saveDiff(diff);
-          writer.write({
-            event: "diff:ready",
-            data: { diff },
-          } as StreamEvent);
-        } else {
-          writer.write({
-            event: "diff:ready",
-            data: { diff: null },
-          } as StreamEvent);
-        }
-
-        // 4. Analyst Module: Fit Score, Risk Flags, Actions
-        try {
-          const report = await analystModule.analyze(profile, {
-            previousProfile: existingProfile ?? undefined,
-          });
-          writer.write({
-            event: "analysis:ready",
-            data: { report },
-          } as StreamEvent);
-        } catch (err) {
-          writer.write({
-            event: "error",
-            data: {
-              message: err instanceof Error ? err.message : "Không thể phân tích hồ sơ.",
-            },
-          } as StreamEvent);
-        }
-
-        writer.write({ event: "done", data: {} } as StreamEvent);
-      } catch (err) {
-        writer.write({
-          event: "error",
-          data: {
-            message: err instanceof Error ? err.message : "Unknown error",
-          },
-        } as StreamEvent);
-        writer.write({ event: "done", data: {} } as StreamEvent);
+        });
       } finally {
+        clearTimeout(deadlineTimeout);
+        req.signal.removeEventListener("abort", onReqAbort);
+        await flushLangfuse();
         writer.close();
       }
     })();

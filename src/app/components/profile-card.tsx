@@ -44,7 +44,7 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
   };
 
   return (
-    <div className="glass-card overflow-hidden animate-fade-in space-y-0">
+    <div className="glass-card min-w-0 overflow-hidden animate-fade-in space-y-0">
       {/* Header */}
       <div className="p-6 border-b border-card-border bg-gradient-to-r from-accent/10 via-purple-500/5 to-transparent">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">

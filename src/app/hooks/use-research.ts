@@ -13,6 +13,7 @@ export type SourceStatus = "idle" | "started" | "done" | "failed";
 
 export interface ResearchState {
   status: "idle" | "researching" | "building" | "done" | "error";
+  input: CompanyInput | null;
   sourceStatuses: Record<SourceName, SourceStatus>;
   findings: { source: SourceName; summary: string }[];
   profile: CompanyProfile | null;
@@ -23,6 +24,7 @@ export interface ResearchState {
 
 const INITIAL_STATE: ResearchState = {
   status: "idle",
+  input: null,
   sourceStatuses: {
     web_search: "idle",
     website: "idle",
@@ -49,6 +51,7 @@ export function useResearch() {
 
     setState({
       ...INITIAL_STATE,
+      input,
       status: "researching",
     });
 

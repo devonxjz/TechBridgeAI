@@ -3,7 +3,11 @@
 // ═══════════════════════════════════════════════════════
 
 import type { CompanyProfile, ProfileDiff } from "@/lib/types";
-import type { StorageAdapter } from "./types";
+import type {
+  StorageAdapter,
+  StorageReadOptions,
+  StorageWriteOptions,
+} from "./types";
 
 export class MemoryStorageAdapter implements StorageAdapter {
   // companyId → version → profile
@@ -11,7 +15,11 @@ export class MemoryStorageAdapter implements StorageAdapter {
   // companyId → diffs
   private diffs: Map<string, ProfileDiff[]> = new Map();
 
-  async saveProfile(profile: CompanyProfile): Promise<void> {
+  async saveProfile(
+    profile: CompanyProfile,
+    options?: StorageWriteOptions,
+  ): Promise<void> {
+    options?.signal?.throwIfAborted();
     if (!this.profiles.has(profile.id)) {
       this.profiles.set(profile.id, new Map());
     }
@@ -33,7 +41,11 @@ export class MemoryStorageAdapter implements StorageAdapter {
     return this.getLatestProfile(companyId);
   }
 
-  async getLatestProfile(companyId: string): Promise<CompanyProfile | null> {
+  async getLatestProfile(
+    companyId: string,
+    options?: StorageReadOptions,
+  ): Promise<CompanyProfile | null> {
+    options?.signal?.throwIfAborted();
     const versions = this.profiles.get(companyId);
     if (!versions || versions.size === 0) return null;
 
@@ -51,7 +63,11 @@ export class MemoryStorageAdapter implements StorageAdapter {
     return result;
   }
 
-  async saveDiff(diff: ProfileDiff): Promise<void> {
+  async saveDiff(
+    diff: ProfileDiff,
+    options?: StorageWriteOptions,
+  ): Promise<void> {
+    options?.signal?.throwIfAborted();
     if (!this.diffs.has(diff.companyId)) {
       this.diffs.set(diff.companyId, []);
     }

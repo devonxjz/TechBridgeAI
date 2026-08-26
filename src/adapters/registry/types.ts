@@ -29,5 +29,8 @@ export class RegistryError extends Error {
 }
 
 export interface RegistryAdapter {
-  findByTaxId(taxId: string): Promise<RegistryRecord | null>;
+  findByTaxId(
+    taxId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<RegistryRecord | null>;
 }

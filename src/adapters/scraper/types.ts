@@ -21,6 +21,10 @@ export interface ScrapedContent {
   metadata?: Record<string, unknown> & { provider?: ScraperProvider };
 }
 
+export interface ScrapeOptions {
+  signal?: AbortSignal;
+}
+
 export class ScrapeError extends Error {
   constructor(
     message: string,
@@ -34,5 +38,5 @@ export class ScrapeError extends Error {
 }
 
 export interface ScraperAdapter {
-  extract(url: string): Promise<ScrapedContent>;
+  extract(url: string, options?: ScrapeOptions): Promise<ScrapedContent>;
 }

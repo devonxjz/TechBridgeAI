@@ -25,6 +25,9 @@ import { SupabaseStorageAdapter } from "@/adapters/storage/supabase";
 
 export interface ResourceGuards {
   maxConcurrentResearch: number;
+  maxQueriesPerResearch: number;
+  maxConcurrentSourceNodes: number;
+  maxConcurrentProviderCalls: number;
   sourceTimeoutMs: number;
   maxRetriesPerSource: number;
   maxTokensPerResearch: number;
@@ -38,6 +41,9 @@ export interface ResourceGuards {
 export function getGuards(): ResourceGuards {
   return {
     maxConcurrentResearch: int(process.env.MAX_CONCURRENT_RESEARCH, 1),
+    maxQueriesPerResearch: int(process.env.MAX_QUERIES_PER_RESEARCH, 6),
+    maxConcurrentSourceNodes: int(process.env.MAX_CONCURRENT_SOURCE_NODES, 3),
+    maxConcurrentProviderCalls: int(process.env.MAX_CONCURRENT_PROVIDER_CALLS, 2),
     sourceTimeoutMs: int(process.env.SOURCE_TIMEOUT_MS, 60_000),
     maxRetriesPerSource: 2,
     maxTokensPerResearch: 50_000,
@@ -48,6 +54,7 @@ export function getGuards(): ResourceGuards {
     maxTokensPerDay: int(process.env.MAX_TOKENS_PER_DAY, 500_000),
   };
 }
+
 
 // ─── Adapter Factories ───
 

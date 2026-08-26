@@ -13,12 +13,13 @@ import type {
   RiskFlag,
   SuggestedAction,
 } from "@/lib/types";
-import type { LLMAdapter } from "@/adapters/llm/types";
+import type { LLMAdapter, LLMInvocationContext } from "@/adapters/llm/types";
 
 export interface AnalystModule {
   analyze(
     profile: CompanyProfile,
-    context?: AnalysisContext
+    context?: AnalysisContext,
+    llmContext?: LLMInvocationContext,
   ): Promise<AnalysisReport>;
 }
 
@@ -68,7 +69,7 @@ type LLMAnalysisOutput = z.infer<typeof LLMAnalysisSchema>;
 
 export function createAnalystModule(deps: AnalystDeps): AnalystModule {
   return {
-    async analyze(profile, context) {
+    async analyze(profile, context, llmContext) {
       const prompt = buildAnalysisPrompt(profile, context);
 
       const llmOutput = await deps.llm.completeStructured<LLMAnalysisOutput>(
@@ -77,6 +78,7 @@ export function createAnalystModule(deps: AnalystDeps): AnalystModule {
         {
           systemPrompt: ANALYST_SYSTEM_PROMPT,
           temperature: 0.2,
+          context: llmContext,
         }
       );
 

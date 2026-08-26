@@ -4,8 +4,10 @@
 > Nền tảng thẩm định doanh nghiệp thông minh tự động: Thu thập dữ liệu đa nguồn độc lập, tổng hợp hồ sơ chuẩn hóa qua LLM, đánh giá điểm phù hợp hợp tác (Collaboration Fit Score), theo dõi biến động lịch sử (Diff Engine) và xuất báo cáo One-Pager PDF chuyên nghiệp.
 
 [![CI Pipeline](https://github.com/devonxjz/TechBridgeAI/actions/workflows/ci.yml/badge.svg)](https://github.com/devonxjz/TechBridgeAI/actions/workflows/ci.yml)
-[![Tests Passing](https://img.shields.io/badge/Tests-16%20Suites%20%7C%20110%20Passed-success?logo=vitest)](https://vitest.dev/)
+[![Tests Passing](https://img.shields.io/badge/Tests-23%20Suites%20%7C%20136%20Passed-success?logo=vitest)](https://vitest.dev/)
 [![Next.js 16](https://img.shields.io/badge/Next.js-16%20(Turbopack)-black?logo=next.js)](https://nextjs.org/)
+[![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph%20v1.4-blue?logo=langchain)](https://langchain.com/)
+[![Langfuse](https://img.shields.io/badge/Observability-Langfuse%20Cloud-orange)](https://langfuse.com/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x%20%2F%207.0.2-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![OpenAI](https://img.shields.io/badge/AI-OpenAI%20Structured%20Outputs-412991?logo=openai)](https://openai.com/)
 [![Supabase](https://img.shields.io/badge/Storage-Supabase%20PostgreSQL-3ECF8E?logo=supabase)](https://supabase.com)
@@ -24,13 +26,23 @@
 
 ## 🌟 Tính Năng Nổi Bật
 
+* 🔄 **LangGraph Parallel StateGraph Orchestration:**
+  * Khởi tạo đồ thị trạng thái song song 5 luồng thu thập độc lập (`web_search`, `website`, `news`, `registry`, `linkedin`) với cơ chế fan-in chuẩn hóa bằng Zod state annotation.
+  * Giới hạn tối đa 6 câu truy vấn định danh (`buildResearchQueries`) và ngân sách gọi mô hình / token tiền trạm (`createResearchBudget`).
+  * Tự động cô lập bằng chứng không tin cậy bằng thẻ `<UNTRUSTED_SOURCE_DATA>` và áp dụng chính sách ưu tiên theo từng trường dữ liệu (Field-sensitive precedence).
+* 🔭 **Langfuse Cloud Tracing & Privacy Minimization:**
+  * Giám sát toàn diện vòng đời đồ thị qua OpenTelemetry (`@langfuse/otel` & `@langfuse/langchain`).
+  * Tự động làm sạch dữ liệu nhạy cảm (API Keys, Bearer tokens, email cá nhân, số điện thoại, HTML thô) trước khi gửi telemetry ra ngoài.
+  * Tính điểm chất lượng tất định (`source_coverage`, `profile_schema_valid`, `profile_confidence`, `analysis_schema_valid`, `research_success`).
 * 🌐 **Multi-source Research Pipeline (Thu thập đa nguồn thời gian thực):**
   * 🔍 **Web Search:** Tích hợp Serper Google Search API và chỉ tổng hợp dữ liệu trả về từ nguồn thật.
   * 🛡️ **Tiered Website Scraper (3 cấp độ tự phục hồi):** Chuỗi fallback `SafeDirect → Jina Reader → TinyFish` với cơ chế chống SSRF (Private IP/Localhost block), DNS Pinning, giới hạn luồng 1MB và bộ lọc HTML tuyến tính an toàn.
   * 🏛️ **VietQR Official Business Registry:** Tra cứu trực tiếp thông tin doanh nghiệp qua Mã số thuế (MST) với in-memory caching (7 ngày), tự động fallback sang Aggregator Search khi API nghẽn.
   * 📰 **Tin tức kinh doanh Việt Nam:** Tự động tìm kiếm các bài viết từ CafeF, Báo Đầu tư, VnExpress, Vietstock...
-  * 💼 **Bóc tách LinkedIn / Nhân sự:** Thu thập thông tin ban lãnh đạo và đội ngũ cốt cán.
-* ⚡ **Real-time SSE Streaming:** Trực quan hóa tiến trình thu thập và phân tích dữ liệu dạng timeline sự kiện thời gian thực (Server-Sent Events).
+  * 💼 **Bóc tách LinkedIn / Nhân sự:** Thu thập thông tin ban lãnh đạo và đội ngũ cốt cán (tự động bỏ qua khi không có URL).
+* ⚡ **Real-time SSE Streaming & Edge/Vercel Safe:**
+  * API route tối giản `runtime = "nodejs"` với `maxDuration = 300` và hạn chót nội bộ 285s đảm bảo không bị ngắt quãng giữa chừng.
+  * Hủy bỏ luồng tức thì qua `AbortSignal` khi người dùng ngắt kết nối.
 * 🧠 **OpenAI Structured Profile Builder:** Chuẩn hóa thông tin tự động bằng Zod Schema & Structured Outputs (Strict Mode), tính toán độ tin cậy (`overallConfidence`) theo trọng số từng nguồn.
 * 📊 **Analyst Module & Collaboration Fit Score (0–100):** Đánh giá mức độ phù hợp hợp tác kinh doanh theo 5 tiêu chí chuẩn hóa:
   * 🏢 **Phù hợp ngành (Industry Alignment - 30%)**
