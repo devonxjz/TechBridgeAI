@@ -37,7 +37,16 @@ Khi bạn muốn hợp tác với một đối tác hoặc doanh nghiệp mới,
                        └────────────────────────────┘     └────────────────────────────┘
 ```
 
+---
 
+## 🏛️ Sơ Đồ Thực Thể & Lớp Miền (Domain Class Diagram)
+
+<div align="center">
+  <img src="./public/class-diagram-light.png" alt="PartnerIQ Domain Class Diagram" width="100%" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.08);" />
+  <p><em>Sơ đồ cấu trúc dữ liệu miền (Domain Models & Entities) cùng các giao diện Ports & Adapters trong kiến trúc Hexagonal của PartnerIQ.</em></p>
+</div>
+
+---
 
 ## 🔄 Sơ Đồ Quy Trình Điều Phối (LangGraph StateGraph Workflow)
 
