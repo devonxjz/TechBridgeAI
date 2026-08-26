@@ -51,6 +51,7 @@ import {
   flushLangfuse,
   initOpenTelemetry,
   traceResearch,
+  hashCompanyIdentifier,
 } from "@/observability/langfuse";
 import type { SourceExecutionResult } from "@/lib/types";
 import * as langfuseObservability from "@/observability/langfuse";
@@ -293,5 +294,47 @@ describe("Langfuse Observability & Privacy Minimization", () => {
       { traceId: "trace-123", name: "research_success", value: "complete" },
     ]);
     expect(clientMocks.flush).toHaveBeenCalledOnce();
+  });
+
+  it("hashes company identifier deterministically with salt", () => {
+    vi.stubEnv("LANGFUSE_SALT", "test-secret-salt");
+    const hash1 = hashCompanyIdentifier("0101248141");
+    const hash2 = hashCompanyIdentifier("0101248141");
+    const hashDiff = hashCompanyIdentifier("0101245486");
+
+    expect(hash1).toBe(hash2);
+    expect(hash1).not.toBe(hashDiff);
+    expect(hash1).toHaveLength(64); // SHA-256 hex length
+  });
+
+  it("includes cache metadata in trace attributes", async () => {
+    vi.stubEnv("LANGFUSE_ENABLED", "true");
+    vi.stubEnv("LANGFUSE_PUBLIC_KEY", "pk-test");
+    vi.stubEnv("LANGFUSE_SECRET_KEY", "sk-test");
+
+    await traceResearch(
+      {
+        researchRunId: "run-cache-hit",
+        companyId: "comp-fpt",
+        requestedSources: [],
+        cacheHit: true,
+        cacheMatchedBy: "tax_id",
+        cacheAction: "auto",
+      },
+      async () => undefined
+    );
+
+    expect(tracingMocks.propagateAttributes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tags: expect.arrayContaining(["cache:hit"]),
+        metadata: expect.objectContaining({
+          cacheHit: "true",
+          cacheMatchedBy: "tax_id",
+          cacheAction: "auto",
+          companyIdHash: expect.any(String),
+        }),
+      }),
+      expect.any(Function)
+    );
   });
 });

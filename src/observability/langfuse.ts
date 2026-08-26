@@ -12,7 +12,9 @@ import {
   updateActiveObservation,
 } from "@langfuse/tracing";
 import { NodeSDK } from "@opentelemetry/sdk-node";
+import crypto from "node:crypto";
 import type {
+  CacheHitMatchedBy,
   ResearchOutcome,
   SourceExecutionResult,
   SourceName,
@@ -41,6 +43,14 @@ export interface ResearchTraceContext {
   companyId: string;
   requestedSources: SourceName[];
   sessionId?: string;
+  cacheHit?: boolean;
+  cacheMatchedBy?: CacheHitMatchedBy | "none";
+  cacheAction?: "auto" | "bypass" | "select" | "refresh";
+}
+
+export function hashCompanyIdentifier(identifier: string): string {
+  const salt = process.env.LANGFUSE_SALT || "partneriq-telemetry-salt";
+  return crypto.createHmac("sha256", salt).update(identifier).digest("hex");
 }
 
 export interface DeterministicScore {
@@ -180,18 +190,28 @@ export async function traceResearch<T>(
 
   let taskPromise: Promise<T> | undefined;
   try {
+    const isCacheHit = Boolean(context.cacheHit);
+    const tags = [
+      "workflow:research",
+      "surface:sse",
+      isCacheHit ? "cache:hit" : "cache:miss",
+    ];
     return await propagateAttributes(
       {
         traceName: "partneriq.research",
         sessionId: context.sessionId,
         version: APP_VERSION,
-        tags: ["workflow:research", "surface:sse"],
+        tags,
         environment:
           process.env.LANGFUSE_TRACING_ENVIRONMENT || "production",
         metadata: {
           researchRunId: context.researchRunId,
           companyId: context.companyId,
+          companyIdHash: hashCompanyIdentifier(context.companyId),
           requestedSources: context.requestedSources.join(","),
+          cacheHit: isCacheHit ? "true" : "false",
+          cacheMatchedBy: context.cacheMatchedBy || "none",
+          cacheAction: context.cacheAction || "auto",
         },
       },
       () =>
@@ -316,15 +336,24 @@ export function createLangfuseCallback(
   }
 
   try {
+    const isCacheHit = Boolean(context.cacheHit);
     return new CallbackHandler({
       sessionId: context.sessionId,
       version: APP_VERSION,
-      tags: ["workflow:research", "surface:sse"],
+      tags: [
+        "workflow:research",
+        "surface:sse",
+        isCacheHit ? "cache:hit" : "cache:miss",
+      ],
       traceMetadata: {
         researchRunId: context.researchRunId,
         companyId: context.companyId,
+        companyIdHash: hashCompanyIdentifier(context.companyId),
         requestedSources: context.requestedSources,
         appVersion: APP_VERSION,
+        cacheHit: isCacheHit,
+        cacheMatchedBy: context.cacheMatchedBy || "none",
+        cacheAction: context.cacheAction || "auto",
       },
     });
   } catch (err) {

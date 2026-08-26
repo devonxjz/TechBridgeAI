@@ -105,6 +105,24 @@ export async function POST(req: NextRequest) {
         }
 
         if (resolution.kind === "hit") {
+          const traceContext: ResearchTraceContext = {
+            researchRunId,
+            companyId: resolution.snapshot.profile.id,
+            requestedSources: [],
+            cacheHit: true,
+            cacheMatchedBy: resolution.matchedBy,
+            cacheAction: "auto",
+          };
+          await traceResearch(traceContext, async (traceId) => {
+            await emitResearchScores(traceId, {
+              sourceResults: [],
+              hasProfile: true,
+              hasAnalysis: true,
+              overallConfidence: resolution.snapshot.profile.overallConfidence,
+              outcome: "complete",
+            });
+          });
+
           writer.write({
             event: "cache:hit",
             data: {
@@ -185,6 +203,25 @@ export async function POST(req: NextRequest) {
           const snapshot = await researchCache.select(input, selectedCompanyId, {
             signal: controller.signal,
           });
+
+          const traceContext: ResearchTraceContext = {
+            researchRunId,
+            companyId: snapshot.profile.id,
+            requestedSources: [],
+            cacheHit: true,
+            cacheMatchedBy: "user_selection",
+            cacheAction: "select",
+          };
+          await traceResearch(traceContext, async (traceId) => {
+            await emitResearchScores(traceId, {
+              sourceResults: [],
+              hasProfile: true,
+              hasAnalysis: true,
+              overallConfidence: snapshot.profile.overallConfidence,
+              outcome: "complete",
+            });
+          });
+
           writer.write({
             event: "cache:hit",
             data: {
@@ -350,6 +387,9 @@ async function executeLiveWorkflow({
       "registry",
       ...(input.linkedinUrl ? ["linkedin" as SourceName] : []),
     ],
+    cacheHit: false,
+    cacheMatchedBy: "none",
+    cacheAction: existingProfile ? "refresh" : "auto",
   };
   const langfuseCallback = createLangfuseCallback(traceContext);
 

@@ -288,4 +288,56 @@ describe("API Route - /api/research Cache Read-Through", () => {
     expect(mockSearch).toHaveBeenCalled();
     expect(body).toContain("event: research:start");
   });
+
+  it("returns HTTP 400 when request body has invalid JSON", async () => {
+    const req = new NextRequest("http://localhost:3000/api/research", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "invalid-json",
+    });
+
+    const response = await POST(req);
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toContain("Invalid JSON");
+  });
+
+  it("returns HTTP 400 when input validation fails", async () => {
+    const req = new NextRequest("http://localhost:3000/api/research", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        input: {
+          name: "",
+        },
+      }),
+    });
+
+    const response = await POST(req);
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error).toBe("Validation failed");
+  });
+
+  it("returns identity_conflict on invalid refresh company ID", async () => {
+    const req = new NextRequest("http://localhost:3000/api/research", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        input: {
+          name: "Vingroup",
+        },
+        cache: {
+          action: "refresh",
+          companyId: "nonexistent-id",
+        },
+      }),
+    });
+
+    const response = await POST(req);
+    const body = await response.text();
+
+    expect(body).toContain("event: error");
+    expect(body).toContain("identity_conflict");
+  });
 });

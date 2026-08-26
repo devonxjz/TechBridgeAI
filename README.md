@@ -51,6 +51,11 @@
   * 💻 **Trưởng thành số (Digital Maturity - 15%)**
   * 📈 **Hoạt động gần đây (Recent Activity - 20%)**
 * 🔍 **"What Changed?" Diff Engine:** So sánh tự động giữa các phiên bản hồ sơ của một doanh nghiệp (v1 → v2), nhận diện biến động về nhân sự, địa chỉ, ngành nghề và quy mô.
+* ⚡ **Supabase Server Read-Through Research Cache (Deterministic Identity Resolution):**
+  * Tự động nhận diện và tái sử dụng hồ sơ đã nghiên cứu qua MST (`taxId`) hoặc Website (`domain`) với độ trễ phản hồi < 100ms.
+  * Khóa giao dịch phân tán chống tranh chấp đồng thời (`pg_advisory_xact_lock` & `resolve_company_identity`).
+  * Giao diện tương tác trực tiếp: gợi ý ứng viên cache (`CacheSuggestions`), chọn hồ sơ có sẵn (`select`), làm mới dữ liệu (`refresh`) hoặc bỏ qua cache (`bypass`).
+  * Lưu trữ nguyên tử toàn bộ snapshot (`persist_research_snapshot`) gồm Profile, Diff và Analysis Report.
 * 🗄️ **Multi-Version Storage (Supabase PostgreSQL):** Lưu trữ lịch sử hồ sơ dạng JSONB, tối ưu hóa truy vấn và bảo toàn toàn bộ vết thay đổi.
 * 📑 **Bộ Công Cụ Xuất Bản Báo Cáo Chuyên Nghiệp:**
   * 📋 **Markdown & JSON Export:** Sao chép vào Clipboard hoặc tải file `.md` / `.json` ngay tức thì.
@@ -500,10 +505,18 @@ MAX_SCRAPE_PAGES_PER_RESEARCH=5
 # ─── Registry Provider (VietQR) ───
 VIETQR_ENABLED=true               # Tra cứu MST chính thức với 7-day memory cache
 
-# ─── Storage Provider (supabase | memory) ───
+# ─── Storage & Cache Provider (supabase | memory) ───
 STORAGE_PROVIDER=supabase
 SUPABASE_URL=https://xyz.supabase.co
 SUPABASE_ANON_KEY=eyJ...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...  # Dành cho backend atomic transaction / RPC
+
+# ─── Langfuse Observability & Telemetry Privacy ───
+LANGFUSE_ENABLED=true
+LANGFUSE_PUBLIC_KEY=pk-...
+LANGFUSE_SECRET_KEY=sk-...
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+LANGFUSE_SALT=your-secure-salt-for-hashing-identifiers
 
 # ─── Resource & Rate Limit Guards ───
 MAX_CONCURRENT_RESEARCH=1
