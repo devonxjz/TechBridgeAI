@@ -53,6 +53,13 @@ export const INITIAL_STATE: ResearchState = {
   cacheHit: null,
 };
 
+export function buildResearchRequest(
+  input: CompanyInput,
+  cache?: ResearchRequest["cache"]
+): ResearchRequest {
+  return cache ? { input, cache } : { input };
+}
+
 export function reduceResearchEvent(
   state: ResearchState,
   event: StreamEvent
@@ -174,10 +181,7 @@ export function useResearch() {
       });
 
       try {
-        const payload: ResearchRequest = {
-          input,
-          cache,
-        };
+        const payload = buildResearchRequest(input, cache);
 
         const response = await fetch("/api/research", {
           method: "POST",

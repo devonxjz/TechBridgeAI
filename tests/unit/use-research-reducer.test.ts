@@ -1,10 +1,25 @@
 import { describe, it, expect } from "vitest";
 import {
   reduceResearchEvent,
+  buildResearchRequest,
   INITIAL_STATE,
   type ResearchState,
 } from "@/app/hooks/use-research";
 import type { StreamEvent, CompanyProfile, AnalysisReport, ProfileDiff } from "@/lib/types";
+
+describe("useResearch request builder - buildResearchRequest", () => {
+  it("builds default, selected, bypass, and refresh requests", () => {
+    const input = { name: "FPT" };
+
+    expect(buildResearchRequest(input)).toEqual({ input });
+    expect(buildResearchRequest(input, { action: "select", companyId: "fpt" }))
+      .toEqual({ input, cache: { action: "select", companyId: "fpt" } });
+    expect(buildResearchRequest(input, { action: "bypass" }))
+      .toEqual({ input, cache: { action: "bypass" } });
+    expect(buildResearchRequest(input, { action: "refresh", companyId: "fpt" }))
+      .toEqual({ input, cache: { action: "refresh", companyId: "fpt" } });
+  });
+});
 
 describe("useResearch pure reducer - reduceResearchEvent", () => {
   const dummyProfile: CompanyProfile = {
