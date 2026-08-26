@@ -205,6 +205,26 @@ describe("useResearch pure reducer - reduceResearchEvent", () => {
     expect(nextState.errorCode).toBe("identity_conflict");
   });
 
+  it("records notice without setting error status on cache_invalid error event", () => {
+    const researchingState: ResearchState = {
+      ...INITIAL_STATE,
+      status: "researching",
+    };
+
+    const event: StreamEvent = {
+      event: "error",
+      data: {
+        message: "Dữ liệu cache không hợp lệ, đang tiến hành nghiên cứu mới.",
+        code: "cache_invalid",
+      },
+    };
+
+    const nextState = reduceResearchEvent(researchingState, event);
+    expect(nextState.status).toBe("researching");
+    expect(nextState.error).toBeNull();
+    expect(nextState.notice).toBe("Dữ liệu cache không hợp lệ, đang tiến hành nghiên cứu mới.");
+  });
+
   it("transitions to done when profile and analysis are ready", () => {
     let state = reduceResearchEvent(INITIAL_STATE, {
       event: "profile:ready",

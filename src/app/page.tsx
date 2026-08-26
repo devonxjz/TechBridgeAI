@@ -120,6 +120,19 @@ export default function HomePage() {
                 />
               )}
 
+              {state.notice && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="glass-card p-4 border-l-3 border-l-amber-500 bg-amber-500/10 text-amber-200 animate-fade-in"
+                >
+                  <div className="flex items-center gap-2">
+                    <span>⚠️</span>
+                    <p className="text-xs font-medium">{state.notice}</p>
+                  </div>
+                </div>
+              )}
+
               {state.error && (
                 <div className="glass-card p-4 border-l-3 border-l-error animate-fade-in">
                   <p className="text-sm text-error font-medium">Lỗi</p>

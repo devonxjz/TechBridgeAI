@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/research/route";
 import { MemoryStorageAdapter } from "@/adapters/storage/memory";
+import { CacheInvalidError } from "@/modules/cache";
 import type { CompanyProfile, AnalysisReport } from "@/lib/types";
 
 const mockLLM = vi.fn();
@@ -73,6 +74,7 @@ vi.mock("@/observability/langfuse", () => ({
     task("mock-trace-id"),
   updateResearchObservationOutcome: vi.fn(),
   updateResearchTraceOutcome: vi.fn(),
+  updateResearchCacheOutcome: vi.fn(),
 }));
 
 describe("API Route - /api/research Cache Read-Through", () => {
@@ -192,10 +194,9 @@ describe("API Route - /api/research Cache Read-Through", () => {
     });
 
     const response = await POST(req);
-    const body = await response.text();
-
-    expect(body).toContain("event: error");
-    expect(body).toContain("identity_conflict");
+    expect(response.status).toBe(409);
+    const json = await response.json();
+    expect(json.code).toBe("identity_conflict");
   });
 
   it("resolves cache selection when action is select", async () => {
@@ -252,10 +253,9 @@ describe("API Route - /api/research Cache Read-Through", () => {
     });
 
     const response = await POST(req);
-    const body = await response.text();
-
-    expect(body).toContain("event: error");
-    expect(body).toContain("invalid_cache_selection");
+    expect(response.status).toBe(400);
+    const json = await response.json();
+    expect(json.code).toBe("invalid_cache_selection");
   });
 
   it("bypasses cache when action is bypass", async () => {
@@ -335,9 +335,37 @@ describe("API Route - /api/research Cache Read-Through", () => {
     });
 
     const response = await POST(req);
+    expect(response.status).toBe(409);
+    const json = await response.json();
+    expect(json.code).toBe("identity_conflict");
+  });
+
+  it("emits non-terminal cache_invalid notice and proceeds to live workflow on corrupt snapshot", async () => {
+    await storage.resolveOrCreateIdentity(
+      { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
+      "comp-fpt"
+    );
+    vi.spyOn(storage, "getLatestCompleteSnapshot").mockRejectedValueOnce(
+      new CacheInvalidError("Corrupted JSONB")
+    );
+
+    const req = new NextRequest("http://localhost:3000/api/research", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        input: {
+          name: "Công ty CP FPT",
+          taxId: "0101248141",
+        },
+      }),
+    });
+
+    const response = await POST(req);
+    expect(response.status).toBe(200);
     const body = await response.text();
 
-    expect(body).toContain("event: error");
-    expect(body).toContain("identity_conflict");
+    expect(body).toContain("cache_invalid");
+    expect(body).toContain("event: research:start");
+    expect(mockSearch).toHaveBeenCalled();
   });
 });

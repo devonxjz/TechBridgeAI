@@ -11,6 +11,7 @@ import {
   type CompanyProfile,
   type StreamEvent,
   type SourceName,
+  type ResearchSnapshot,
 } from "@/lib/types";
 import { createSSEStream, type SSEWriter } from "@/lib/stream";
 import {
@@ -25,8 +26,11 @@ import {
   createResearchCache,
   normalizeCompanyIdentity,
   IdentityConflictError,
+  InvalidCacheSelectionError,
+  CacheUnavailableError,
   type NormalizedCompanyIdentity,
   type ResearchCache,
+  type CacheResolution,
 } from "@/modules/cache";
 import { createProfileModule } from "@/modules/profile";
 import { createAnalystModule } from "@/modules/analyst";
@@ -37,6 +41,7 @@ import {
   emitResearchScores,
   flushLangfuse,
   traceResearch,
+  updateResearchCacheOutcome,
   type ResearchTraceContext,
   updateResearchObservationOutcome,
   updateResearchTraceOutcome,
@@ -46,12 +51,13 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
+  // 1. JSON parsing and schema validation
   let body: unknown;
   try {
     body = await req.json();
   } catch {
     return new Response(
-      JSON.stringify({ error: "Invalid JSON body" }),
+      JSON.stringify({ error: "Invalid JSON in request body" }),
       { status: 400, headers: { "Content-Type": "application/json" } }
     );
   }
@@ -69,12 +75,118 @@ export async function POST(req: NextRequest) {
 
   const { input, cache } = parseResult.data;
   const action = cache?.action ?? "auto";
-  const selectedCompanyId = cache?.action === "select" ? cache.companyId : undefined;
-  const refreshCompanyId = cache?.action === "refresh" ? cache.companyId : undefined;
+  const selectedCompanyId =
+    cache?.action === "select" ? cache.companyId : undefined;
+  const refreshCompanyId =
+    cache?.action === "refresh" ? cache.companyId : undefined;
 
   const storage = createStorageAdapter();
   const researchCache = createResearchCache(storage);
 
+  // 2. Preflight Cache Resolution before opening SSE stream
+  let autoResolution: CacheResolution | null = null;
+  let selectedSnapshot: ResearchSnapshot | null = null;
+  let refreshSnapshot: ResearchSnapshot | null = null;
+
+  try {
+    if (action === "auto") {
+      autoResolution = await researchCache.lookup(input, {
+        signal: req.signal,
+      });
+      if (autoResolution.kind === "conflict") {
+        return new Response(
+          JSON.stringify({
+            error: "Thông tin định danh công ty mâu thuẫn.",
+            code: "identity_conflict",
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    } else if (action === "select") {
+      if (!selectedCompanyId) {
+        return new Response(
+          JSON.stringify({
+            error: "Thiếu mã định danh công ty được chọn.",
+            code: "invalid_cache_selection",
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      selectedSnapshot = await researchCache.select(input, selectedCompanyId, {
+        signal: req.signal,
+      });
+    } else if (action === "refresh") {
+      if (!refreshCompanyId) {
+        return new Response(
+          JSON.stringify({
+            error: "Thiếu mã định danh công ty cần làm mới.",
+            code: "identity_conflict",
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      refreshSnapshot = await researchCache.prepareRefresh(
+        input,
+        refreshCompanyId,
+        {
+          signal: req.signal,
+        }
+      );
+    } else if (action === "bypass") {
+      const norm = normalizeCompanyIdentity(input);
+      if (norm.taxId) {
+        const candidates = await storage.findIdentityCandidates(norm, {
+          signal: req.signal,
+        });
+        const taxMatch = candidates.find((c) => c.taxId === norm.taxId);
+        if (
+          taxMatch &&
+          norm.domain &&
+          taxMatch.domain &&
+          norm.domain !== taxMatch.domain
+        ) {
+          return new Response(
+            JSON.stringify({
+              error:
+                "Không thể bỏ qua cache khi thông tin định danh mâu thuẫn với MST đã đăng ký.",
+              code: "identity_conflict",
+            }),
+            { status: 409, headers: { "Content-Type": "application/json" } }
+          );
+        }
+      }
+    }
+  } catch (err) {
+    if (err instanceof IdentityConflictError) {
+      return new Response(
+        JSON.stringify({ error: err.message, code: "identity_conflict" }),
+        { status: 409, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    if (err instanceof InvalidCacheSelectionError) {
+      return new Response(
+        JSON.stringify({
+          error: err.message,
+          code: "invalid_cache_selection",
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    if (err instanceof CacheUnavailableError) {
+      return new Response(
+        JSON.stringify({ error: err.message, code: "cache_unavailable" }),
+        { status: 503, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    const message =
+      err instanceof Error ? err.message : "Cache preflight failed";
+    return new Response(
+      JSON.stringify({ error: message, code: "cache_unavailable" }),
+      { status: 503, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  // 3. Open SSE Stream
   const { stream, writer } = createSSEStream();
   const researchRunId = crypto.randomUUID();
 
@@ -88,29 +200,14 @@ export async function POST(req: NextRequest) {
 
   void (async () => {
     try {
-      // 1. Check Cache / Handle Action
-      if (action === "auto") {
-        let resolution;
-        try {
-          resolution = await researchCache.lookup(input, { signal: controller.signal });
-        } catch (err) {
-          const message =
-            err instanceof Error ? err.message : "Cache lookup failed";
-          writer.write({
-            event: "error",
-            data: { message, code: "cache_unavailable" },
-          } as StreamEvent);
-          writer.write({ event: "done", data: {} } as StreamEvent);
-          return;
-        }
-
-        if (resolution.kind === "hit") {
+      if (action === "auto" && autoResolution) {
+        if (autoResolution.kind === "hit") {
           const traceContext: ResearchTraceContext = {
             researchRunId,
-            companyId: resolution.snapshot.profile.id,
+            companyId: autoResolution.snapshot.profile.id,
             requestedSources: [],
             cacheHit: true,
-            cacheMatchedBy: resolution.matchedBy,
+            cacheMatchedBy: autoResolution.matchedBy,
             cacheAction: "auto",
           };
           await traceResearch(traceContext, async (traceId) => {
@@ -118,7 +215,8 @@ export async function POST(req: NextRequest) {
               sourceResults: [],
               hasProfile: true,
               hasAnalysis: true,
-              overallConfidence: resolution.snapshot.profile.overallConfidence,
+              overallConfidence:
+                autoResolution.snapshot.profile.overallConfidence,
               outcome: "complete",
             });
           });
@@ -126,174 +224,122 @@ export async function POST(req: NextRequest) {
           writer.write({
             event: "cache:hit",
             data: {
-              companyId: resolution.snapshot.profile.id,
-              matchedBy: resolution.matchedBy,
-              version: resolution.snapshot.profile.version,
-              lastSyncedAt: resolution.snapshot.lastSyncedAt,
+              companyId: autoResolution.snapshot.profile.id,
+              matchedBy: autoResolution.matchedBy,
+              version: autoResolution.snapshot.profile.version,
+              lastSyncedAt: autoResolution.snapshot.lastSyncedAt,
             },
           } as StreamEvent);
           writer.write({
             event: "profile:ready",
-            data: { profile: resolution.snapshot.profile },
+            data: { profile: autoResolution.snapshot.profile },
           } as StreamEvent);
-          if (resolution.snapshot.diff) {
+          if (autoResolution.snapshot.diff) {
             writer.write({
               event: "diff:ready",
-              data: { diff: resolution.snapshot.diff },
+              data: { diff: autoResolution.snapshot.diff },
             } as StreamEvent);
           }
           writer.write({
             event: "analysis:ready",
-            data: { report: resolution.snapshot.report },
+            data: { report: autoResolution.snapshot.report },
           } as StreamEvent);
           writer.write({ event: "done", data: {} } as StreamEvent);
           return;
         }
 
-        if (resolution.kind === "suggestions") {
+        if (autoResolution.kind === "suggestions") {
           writer.write({
             event: "cache:suggestions",
-            data: { suggestions: resolution.suggestions },
+            data: { suggestions: autoResolution.suggestions },
           } as StreamEvent);
           writer.write({ event: "done", data: {} } as StreamEvent);
           return;
         }
 
-        if (resolution.kind === "conflict") {
-          writer.write({
-            event: "error",
-            data: {
-              message: "Thông tin định danh công ty mâu thuẫn.",
-              code: "identity_conflict",
-            },
-          } as StreamEvent);
-          writer.write({ event: "done", data: {} } as StreamEvent);
+        if (autoResolution.kind === "miss") {
+          if (autoResolution.cacheInvalid) {
+            writer.write({
+              event: "error",
+              data: {
+                message:
+                  "Dữ liệu cache không hợp lệ, đang tiến hành nghiên cứu mới.",
+                code: "cache_invalid",
+              },
+            } as StreamEvent);
+            updateResearchCacheOutcome({ cacheOutcome: "invalid" });
+          }
+
+          const miss = await researchCache.resolveMiss(input, {
+            signal: controller.signal,
+          });
+          await executeLiveWorkflow({
+            input,
+            companyId: miss.companyId,
+            identity: miss.identity,
+            existingProfile: null,
+            researchRunId,
+            controller,
+            writer,
+            researchCache,
+          });
           return;
         }
+      }
 
-        // Miss -> proceed with live research
-        const miss = await researchCache.resolveMiss(input, { signal: controller.signal });
-        await executeLiveWorkflow({
-          input,
-          companyId: miss.companyId,
-          identity: miss.identity,
-          existingProfile: null,
+      if (action === "select" && selectedSnapshot) {
+        const traceContext: ResearchTraceContext = {
           researchRunId,
-          controller,
-          writer,
-          researchCache,
+          companyId: selectedSnapshot.profile.id,
+          requestedSources: [],
+          cacheHit: true,
+          cacheMatchedBy: "user_selection",
+          cacheAction: "select",
+        };
+        await traceResearch(traceContext, async (traceId) => {
+          await emitResearchScores(traceId, {
+            sourceResults: [],
+            hasProfile: true,
+            hasAnalysis: true,
+            overallConfidence: selectedSnapshot.profile.overallConfidence,
+            outcome: "complete",
+          });
         });
+
+        writer.write({
+          event: "cache:hit",
+          data: {
+            companyId: selectedSnapshot.profile.id,
+            matchedBy: "user_selection",
+            version: selectedSnapshot.profile.version,
+            lastSyncedAt: selectedSnapshot.lastSyncedAt,
+          },
+        } as StreamEvent);
+        writer.write({
+          event: "profile:ready",
+          data: { profile: selectedSnapshot.profile },
+        } as StreamEvent);
+        if (selectedSnapshot.diff) {
+          writer.write({
+            event: "diff:ready",
+            data: { diff: selectedSnapshot.diff },
+          } as StreamEvent);
+        }
+        writer.write({
+          event: "analysis:ready",
+          data: { report: selectedSnapshot.report },
+        } as StreamEvent);
+        writer.write({ event: "done", data: {} } as StreamEvent);
         return;
       }
 
-      if (action === "select") {
-        if (!selectedCompanyId) {
-          writer.write({
-            event: "error",
-            data: {
-              message: "Thiếu mã định danh công ty được chọn.",
-              code: "invalid_cache_selection",
-            },
-          } as StreamEvent);
-          writer.write({ event: "done", data: {} } as StreamEvent);
-          return;
-        }
-
-        try {
-          const snapshot = await researchCache.select(input, selectedCompanyId, {
-            signal: controller.signal,
-          });
-
-          const traceContext: ResearchTraceContext = {
-            researchRunId,
-            companyId: snapshot.profile.id,
-            requestedSources: [],
-            cacheHit: true,
-            cacheMatchedBy: "user_selection",
-            cacheAction: "select",
-          };
-          await traceResearch(traceContext, async (traceId) => {
-            await emitResearchScores(traceId, {
-              sourceResults: [],
-              hasProfile: true,
-              hasAnalysis: true,
-              overallConfidence: snapshot.profile.overallConfidence,
-              outcome: "complete",
-            });
-          });
-
-          writer.write({
-            event: "cache:hit",
-            data: {
-              companyId: snapshot.profile.id,
-              matchedBy: "user_selection",
-              version: snapshot.profile.version,
-              lastSyncedAt: snapshot.lastSyncedAt,
-            },
-          } as StreamEvent);
-          writer.write({
-            event: "profile:ready",
-            data: { profile: snapshot.profile },
-          } as StreamEvent);
-          if (snapshot.diff) {
-            writer.write({
-              event: "diff:ready",
-              data: { diff: snapshot.diff },
-            } as StreamEvent);
-          }
-          writer.write({
-            event: "analysis:ready",
-            data: { report: snapshot.report },
-          } as StreamEvent);
-          writer.write({ event: "done", data: {} } as StreamEvent);
-          return;
-        } catch (err) {
-          const message =
-            err instanceof Error ? err.message : "Invalid cache selection";
-          writer.write({
-            event: "error",
-            data: { message, code: "invalid_cache_selection" },
-          } as StreamEvent);
-          writer.write({ event: "done", data: {} } as StreamEvent);
-          return;
-        }
-      }
-
-      if (action === "refresh") {
-        if (!refreshCompanyId) {
-          writer.write({
-            event: "error",
-            data: {
-              message: "Thiếu mã định danh công ty cần làm mới.",
-              code: "identity_conflict",
-            },
-          } as StreamEvent);
-          writer.write({ event: "done", data: {} } as StreamEvent);
-          return;
-        }
-
-        let snapshot;
-        try {
-          snapshot = await researchCache.prepareRefresh(input, refreshCompanyId, {
-            signal: controller.signal,
-          });
-        } catch (err) {
-          const message =
-            err instanceof Error ? err.message : "Identity conflict on refresh";
-          writer.write({
-            event: "error",
-            data: { message, code: "identity_conflict" },
-          } as StreamEvent);
-          writer.write({ event: "done", data: {} } as StreamEvent);
-          return;
-        }
-
+      if (action === "refresh" && refreshSnapshot) {
         const identity = normalizeCompanyIdentity(input);
         await executeLiveWorkflow({
           input,
-          companyId: refreshCompanyId,
+          companyId: refreshCompanyId!,
           identity,
-          existingProfile: snapshot.profile,
+          existingProfile: refreshSnapshot.profile,
           researchRunId,
           controller,
           writer,
@@ -303,7 +349,9 @@ export async function POST(req: NextRequest) {
       }
 
       if (action === "bypass") {
-        const miss = await researchCache.resolveMiss(input, { signal: controller.signal });
+        const miss = await researchCache.resolveMiss(input, {
+          signal: controller.signal,
+        });
         await executeLiveWorkflow({
           input,
           companyId: miss.companyId,
@@ -385,7 +433,7 @@ async function executeLiveWorkflow({
       "website",
       "news",
       "registry",
-      ...(input.linkedinUrl ? ["linkedin" as SourceName] : []),
+      ...(input.linkedinUrl ? [("linkedin" as SourceName)] : []),
     ],
     cacheHit: false,
     cacheMatchedBy: "none",
@@ -411,78 +459,63 @@ async function executeLiveWorkflow({
             hasProfile: Boolean(state.profile),
             hasAnalysis: Boolean(state.report),
             overallConfidence: state.profile?.overallConfidence ?? 0,
-            outcome: state.outcome === "running" ? "failed" : state.outcome,
+            outcome: state.outcome === "running" ? "partial" : state.outcome,
           });
         },
       })) {
         writer.write(event);
       }
-
-      // Persist snapshot & emit final events
-      if (finalState?.profile && finalState?.report) {
-        try {
-          await researchCache.persist(
-            identity,
-            {
-              profile: finalState.profile,
-              report: finalState.report,
-              diff: finalState.diff,
-            },
-            { signal: controller.signal }
-          );
-
-          writer.write({
-            event: "profile:ready",
-            data: { profile: finalState.profile },
-          } as StreamEvent);
-          if (finalState.diff) {
-            writer.write({
-              event: "diff:ready",
-              data: { diff: finalState.diff },
-            } as StreamEvent);
-          }
-          writer.write({
-            event: "analysis:ready",
-            data: { report: finalState.report },
-          } as StreamEvent);
-        } catch (persistErr) {
-          if (persistErr instanceof IdentityConflictError) {
-            writer.write({
-              event: "error",
-              data: {
-                message: "Hồ sơ nghiên cứu bị từ chối do mâu thuẫn định danh phát sinh.",
-                code: "identity_conflict",
-              },
-            } as StreamEvent);
-          } else {
-            const message =
-              persistErr instanceof Error ? persistErr.message : "Failed to persist snapshot";
-            writer.write({
-              event: "error",
-              data: { message },
-            } as StreamEvent);
-          }
-        }
-      }
-      writer.write({ event: "done", data: {} } as StreamEvent);
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Internal workflow error";
-      updateResearchObservationOutcome(
-        controller.signal.aborted ? "cancelled" : "failed",
-      );
-      await emitResearchScores(traceId, {
-        sourceResults: [],
-        hasProfile: false,
-        hasAnalysis: false,
-        overallConfidence: 0,
-        outcome: "failed",
-      });
-      writer.write({
-        event: "error",
-        data: { message },
-      } as StreamEvent);
-      writer.write({ event: "done", data: {} } as StreamEvent);
+      if ((err as Error).name === "AbortError") {
+        updateResearchObservationOutcome("cancelled");
+        return;
+      }
+      updateResearchObservationOutcome("failed");
+      throw err;
     }
   });
+
+  // Post-workflow atomic cache persistence and event emission
+  if (finalState) {
+    const s = finalState as ResearchWorkflowState;
+    if (s.profile && s.report) {
+      try {
+        await researchCache.persist(
+          identity,
+          {
+            profile: s.profile,
+            report: s.report,
+            diff: s.diff ?? null,
+          },
+          { signal: controller.signal }
+        );
+      } catch (persistErr) {
+        console.error("Failed to persist research snapshot:", persistErr);
+        writer.write({
+          event: "error",
+          data: {
+            message: "Không thể lưu kết quả nghiên cứu vào bộ nhớ đệm.",
+            code: "persist_failed",
+          },
+        } as StreamEvent);
+      }
+
+      writer.write({
+        event: "profile:ready",
+        data: { profile: s.profile },
+      } as StreamEvent);
+      if (s.diff) {
+        writer.write({
+          event: "diff:ready",
+          data: { diff: s.diff },
+        } as StreamEvent);
+      }
+      writer.write({
+        event: "analysis:ready",
+        data: { report: s.report },
+      } as StreamEvent);
+    }
+  }
+
+  writer.write({ event: "done", data: {} } as StreamEvent);
 }

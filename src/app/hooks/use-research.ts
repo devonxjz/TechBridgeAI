@@ -26,6 +26,7 @@ export interface ResearchState {
   report: AnalysisReport | null;
   error: string | null;
   errorCode?: ResearchErrorCode;
+  notice?: string | null;
   suggestions: CacheSuggestion[];
   cacheHit: {
     matchedBy: CacheHitMatchedBy;
@@ -49,6 +50,7 @@ export const INITIAL_STATE: ResearchState = {
   diff: null,
   report: null,
   error: null,
+  notice: null,
   suggestions: [],
   cacheHit: null,
 };
@@ -143,6 +145,12 @@ export function reduceResearchEvent(
       };
 
     case "error":
+      if (event.data.code === "cache_invalid") {
+        return {
+          ...state,
+          notice: event.data.message,
+        };
+      }
       return {
         ...state,
         error: event.data.message,
@@ -191,10 +199,17 @@ export function useResearch() {
         });
 
         if (!response.ok) {
-          const errBody = await response.json().catch(() => ({}));
-          throw new Error(
-            (errBody as { error?: string }).error ?? `HTTP ${response.status}`
-          );
+          const errBody = (await response.json().catch(() => ({}))) as {
+            error?: string;
+            code?: ResearchErrorCode;
+          };
+          setState((prev) => ({
+            ...prev,
+            status: "error",
+            error: errBody.error ?? `HTTP ${response.status}`,
+            errorCode: errBody.code,
+          }));
+          return;
         }
 
         const reader = response.body?.getReader();
