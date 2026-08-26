@@ -27,10 +27,15 @@ export class SupabaseStorageAdapter implements StorageAdapter {
 
   constructor(supabaseUrl?: string, supabaseKey?: string) {
     const url = supabaseUrl || process.env.SUPABASE_URL;
-    const key = supabaseKey || process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const key =
+      supabaseKey ||
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.SUPABASE_ANON_KEY;
 
     if (!url || !key) {
-      throw new Error("Missing Supabase credentials: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+      throw new Error(
+        "Missing Supabase credentials: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY / SUPABASE_ANON_KEY"
+      );
     }
 
     this.client = createClient(url, key, {

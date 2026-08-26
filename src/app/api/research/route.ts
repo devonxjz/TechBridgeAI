@@ -22,6 +22,7 @@ import {
   createStorageAdapter,
   getGuards,
 } from "@/config";
+import type { StorageAdapter } from "@/adapters/storage/types";
 import {
   createResearchCache,
   normalizeCompanyIdentity,
@@ -80,15 +81,17 @@ export async function POST(req: NextRequest) {
   const refreshCompanyId =
     cache?.action === "refresh" ? cache.companyId : undefined;
 
-  const storage = createStorageAdapter();
-  const researchCache = createResearchCache(storage);
-
   // 2. Preflight Cache Resolution before opening SSE stream
   let autoResolution: CacheResolution | null = null;
   let selectedSnapshot: ResearchSnapshot | null = null;
   let refreshSnapshot: ResearchSnapshot | null = null;
+  let storage: StorageAdapter;
+  let researchCache: ResearchCache;
 
   try {
+    storage = createStorageAdapter();
+    researchCache = createResearchCache(storage);
+
     if (action === "auto") {
       autoResolution = await researchCache.lookup(input, {
         signal: req.signal,
