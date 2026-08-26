@@ -194,6 +194,18 @@ export class SupabaseStorageAdapter implements StorageAdapter {
 
     const { data, error } = await query;
     if (error) {
+      if (
+        error.code === "PGRST202" ||
+        error.code === "PGRST205" ||
+        error.message.includes("schema cache") ||
+        error.message.includes("Could not find the function") ||
+        error.message.includes("Could not find the table")
+      ) {
+        console.warn(
+          "Supabase stored procedures not found in database. Operating in live research mode without cache."
+        );
+        return [];
+      }
       throw new Error(`Failed to lookup company identities: ${error.message}`);
     }
 
@@ -223,6 +235,13 @@ export class SupabaseStorageAdapter implements StorageAdapter {
 
     const { data: profileRows, error: profileError } = await profileQuery;
     if (profileError) {
+      if (
+        profileError.code === "PGRST205" ||
+        profileError.message.includes("schema cache") ||
+        profileError.message.includes("Could not find the table")
+      ) {
+        return null;
+      }
       throw new Error(`Failed to get complete profile: ${profileError.message}`);
     }
 
@@ -241,7 +260,15 @@ export class SupabaseStorageAdapter implements StorageAdapter {
 
     const { data: diffRow, error: diffError } = await diffQuery.maybeSingle();
     if (diffError) {
-      throw new Error(`Failed to get snapshot diff: ${diffError.message}`);
+      if (
+        diffError.code === "PGRST205" ||
+        diffError.message.includes("schema cache") ||
+        diffError.message.includes("Could not find the table")
+      ) {
+        // Fallback without diff
+      } else {
+        throw new Error(`Failed to get snapshot diff: ${diffError.message}`);
+      }
     }
 
     const rawSnapshot = {
@@ -279,6 +306,17 @@ export class SupabaseStorageAdapter implements StorageAdapter {
       if (error.message.includes("identity_conflict")) {
         throw new IdentityConflictError();
       }
+      if (
+        error.code === "PGRST202" ||
+        error.code === "PGRST205" ||
+        error.message.includes("schema cache") ||
+        error.message.includes("Could not find the function")
+      ) {
+        console.warn(
+          "Supabase stored procedure resolve_company_identity not found. Using candidate ID."
+        );
+        return candidateId;
+      }
       throw new Error(`Failed to resolve company identity: ${error.message}`);
     }
 
@@ -306,6 +344,22 @@ export class SupabaseStorageAdapter implements StorageAdapter {
     if (error) {
       if (error.message.includes("identity_conflict")) {
         throw new IdentityConflictError();
+      }
+      if (
+        error.code === "PGRST202" ||
+        error.code === "PGRST205" ||
+        error.message.includes("schema cache") ||
+        error.message.includes("Could not find the function")
+      ) {
+        console.warn(
+          "Supabase stored procedure persist_research_snapshot not found. Skipping persistence."
+        );
+        return {
+          profile: snapshot.profile,
+          report: snapshot.report,
+          diff: snapshot.diff,
+          lastSyncedAt: new Date().toISOString(),
+        };
       }
       throw new Error(`Failed to persist research snapshot: ${error.message}`);
     }
