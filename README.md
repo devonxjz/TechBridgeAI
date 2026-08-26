@@ -39,11 +39,11 @@ Khi bạn muốn hợp tác với một đối tác hoặc doanh nghiệp mới,
 
 ---
 
-## 🏛️ Sơ Đồ Thực Thể & Lớp Miền (Domain Class Diagram)
+## ⏱️ Sơ Đồ Trình Tự Thực Thi (Execution Sequence Diagram)
 
 <div align="center">
-  <img src="./public/class-diagram-light.png" alt="PartnerIQ Domain Class Diagram" width="100%" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.08);" />
-  <p><em>Sơ đồ cấu trúc dữ liệu miền (Domain Models & Entities) cùng các giao diện Ports & Adapters trong kiến trúc Hexagonal của PartnerIQ.</em></p>
+  <img src="./public/sequence-diagram-light.png" alt="PartnerIQ Execution Sequence Diagram" width="100%" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.08);" />
+  <p><em>Sơ đồ trình tự xử lý dữ liệu thời gian thực — Từ lúc người dùng gửi yêu cầu, kiểm tra cache, thu thập 5 nguồn song song, tổng hợp AI đến lưu trữ Supabase và xuất báo cáo PDF.</em></p>
 </div>
 
 ---
