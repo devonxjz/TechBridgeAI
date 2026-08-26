@@ -50,7 +50,12 @@ Khi bạn muốn hợp tác với một đối tác hoặc doanh nghiệp mới,
 
 ## 🔄 Sơ Đồ Quy Trình Điều Phối (LangGraph StateGraph Workflow)
 
-Dưới đây là sơ đồ chi tiết toàn bộ các **Node** và **Edge** trong đồ thị LangGraph điều phối quá trình nghiên cứu:
+<div align="center">
+  <img src="./public/workflow-diagram-light.png" alt="PartnerIQ LangGraph Workflow" width="100%" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.08);" />
+  <p><em>Quy trình xử lý dữ liệu qua các Node trong đồ thị LangGraph StateGraph — Tối ưu hóa thu thập song song và tổng hợp AI.</em></p>
+</div>
+
+Dưới đây là chi tiết luồng điều phối qua các Node và Edge:
 
 ```mermaid
 flowchart TD
