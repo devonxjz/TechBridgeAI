@@ -60,4 +60,83 @@ describe("AnalystModule Unit Tests", () => {
     expect(report.suggestedActions[0].priority).toBe("high");
     expect(report.executiveSummary).toContain("đối tác chiến lược");
   });
+
+  it("resolves claim evidence for criteria, risk flags, and actions from profile sources", async () => {
+    const profileWithSources: CompanyProfile = {
+      ...sampleProfile,
+      sources: [
+        {
+          source: "news",
+          url: "https://vnexpress.net/fpt-ai",
+          accessedAt: new Date(),
+          fieldsContributed: [],
+          publication: { publisherDomain: "vnexpress.net", authors: [] },
+          contentFingerprint: "fp-1",
+        },
+        {
+          source: "news",
+          url: "https://dantri.com.vn/fpt-risk",
+          accessedAt: new Date(),
+          fieldsContributed: [],
+          publication: { publisherDomain: "dantri.com.vn", authors: [] },
+          contentFingerprint: "fp-2",
+        },
+      ],
+    };
+
+    const mockAnalysisData = {
+      executiveSummary: "FPT đánh giá tích cực",
+      criteria: [
+        {
+          name: "Recent Activity",
+          score: 90,
+          reasoning: "Tăng trưởng mạnh",
+          evidence: {
+            supportingUrls: ["https://vnexpress.net/fpt-ai"],
+            conflictingUrls: [],
+          },
+        },
+        { name: "Industry Alignment", score: 80, reasoning: "Phù hợp" },
+        { name: "Company Size Match", score: 80, reasoning: "Lớn" },
+        { name: "Geographic Relevance", score: 80, reasoning: "Rộng" },
+        { name: "Digital Maturity", score: 80, reasoning: "Cao" },
+      ],
+      riskFlags: [
+        {
+          type: "reputation",
+          description: "Rủi ro biến động thị trường",
+          severity: "low",
+          evidence: {
+            supportingUrls: ["https://dantri.com.vn/fpt-risk"],
+            conflictingUrls: [],
+          },
+        },
+      ],
+      suggestedActions: [
+        {
+          action: "Liên hệ làm việc",
+          priority: "high",
+          reasoning: "Thời điểm thích hợp",
+          evidence: {
+            supportingUrls: ["https://vnexpress.net/fpt-ai"],
+            conflictingUrls: [],
+          },
+        },
+      ],
+    };
+
+    llm.setResponse("Phân tích và đánh giá", JSON.stringify(mockAnalysisData));
+    const report = await analystModule.analyze(profileWithSources);
+
+    const recentAct = report.fitScore?.criteria.find((c) => c.name === "Recent Activity");
+    expect(recentAct?.evidence?.status).toBe("single_source");
+    expect(recentAct?.evidence?.supportingUrls).toEqual(["https://vnexpress.net/fpt-ai"]);
+
+    expect(report.riskFlags[0].evidence?.status).toBe("single_source");
+    expect(report.riskFlags[0].evidence?.supportingUrls).toEqual(["https://dantri.com.vn/fpt-risk"]);
+
+    expect(report.suggestedActions[0].evidence?.status).toBe("single_source");
+    expect(report.suggestedActions[0].evidence?.supportingUrls).toEqual(["https://vnexpress.net/fpt-ai"]);
+  });
 });
+

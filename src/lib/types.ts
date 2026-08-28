@@ -205,6 +205,9 @@ export interface SourceCitation {
   url: string;
   accessedAt: Date;
   fieldsContributed: ProfileField[] | string[];
+  title?: string;
+  snippet?: string;
+  confidence?: number;
   publication?: PublicationMetadata;
   previewPolicy?: PreviewPolicy;
   signals?: SourceSignals;
@@ -447,6 +450,9 @@ export const SourceCitationSchema = z.object({
   url: z.string(),
   accessedAt: z.coerce.date(),
   fieldsContributed: z.array(z.string()),
+  title: z.string().optional(),
+  snippet: z.string().optional(),
+  confidence: z.number().optional(),
   publication: PublicationMetadataSchema.optional(),
   previewPolicy: PreviewPolicySchema.optional(),
   signals: SourceSignalsSchema.optional(),
