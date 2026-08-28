@@ -50,6 +50,8 @@ export interface ResearchWorkflowOptions {
   onComplete?: (state: ResearchWorkflowState) => void | Promise<void>;
 }
 
+import type { CrawlPolicy } from "@/modules/research/crawl-policy";
+
 export interface ResearchWorkflowDeps {
   search: SearchAdapter;
   scraper: ScraperAdapter;
@@ -57,6 +59,7 @@ export interface ResearchWorkflowDeps {
   profile: ProfileModule;
   analyst: AnalystModule;
   guards: ResourceGuards;
+  crawlPolicy?: CrawlPolicy;
 }
 
 export interface ResearchWorkflow {
@@ -76,7 +79,9 @@ export function createResearchWorkflow(deps: ResearchWorkflowDeps): ResearchWork
     scraper: deps.scraper,
     registry: deps.registry,
     guards: deps.guards,
+    crawlPolicy: deps.crawlPolicy,
   });
+
 
   return {
     async run(input, options) {

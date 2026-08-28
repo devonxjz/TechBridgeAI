@@ -19,6 +19,8 @@ import { scrapeLinkedIn } from "./sources/linkedin";
 import { buildResearchQueries } from "./queries";
 import type { ResearchBudget } from "./budget";
 
+import type { CrawlPolicy } from "./crawl-policy";
+
 export interface ResearchSourceContext {
   budget: ResearchBudget;
   signal?: AbortSignal;
@@ -34,6 +36,7 @@ export interface ResearchDeps {
   scraper: ScraperAdapter;
   registry: RegistryAdapter;
   guards: ResourceGuards;
+  crawlPolicy?: CrawlPolicy;
 }
 
 export function createResearchSourceRunners(
@@ -53,14 +56,16 @@ export function createResearchSourceRunners(
         bindSearchAdapter(deps.search, context),
         deps.guards.maxScrapePagesPerResearch,
       ),
-    news: (input, context) =>
-      searchNews(
+    news: (input, context) => {
+      const extractionEnabled = process.env.NEWS_ARTICLE_EXTRACTION_ENABLED !== "false";
+      return searchNews(
         input,
         bindSearchAdapter(deps.search, context),
-        bindScraperAdapter(deps.scraper, context),
-        undefined,
+        extractionEnabled ? bindScraperAdapter(deps.scraper, context) : undefined,
+        extractionEnabled ? deps.crawlPolicy : undefined,
         buildResearchQueries(input, deps.guards.maxQueriesPerResearch).news,
-      ),
+      );
+    },
     registry: (input, context) =>
       fetchRegistryData(
         input,
@@ -72,6 +77,7 @@ export function createResearchSourceRunners(
       scrapeLinkedIn(input, bindScraperAdapter(deps.scraper, context)),
   };
 }
+
 
 function bindSearchAdapter(
   adapter: SearchAdapter,

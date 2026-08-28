@@ -20,6 +20,7 @@ import {
   createScraperAdapter,
   createRegistryAdapter,
   createStorageAdapter,
+  createCrawlPolicyAdapter,
   getGuards,
 } from "@/config";
 import type { StorageAdapter } from "@/adapters/storage/types";
@@ -415,6 +416,7 @@ async function executeLiveWorkflow({
   const search = createSearchAdapter();
   const scraper = createScraperAdapter();
   const registry = createRegistryAdapter();
+  const crawlPolicy = createCrawlPolicyAdapter();
 
   const profile = createProfileModule({ llm });
   const analyst = createAnalystModule({ llm });
@@ -426,6 +428,7 @@ async function executeLiveWorkflow({
     profile,
     analyst,
     guards,
+    crawlPolicy,
   });
 
   const traceContext: ResearchTraceContext = {

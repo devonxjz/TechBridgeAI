@@ -56,6 +56,8 @@ export function getGuards(): ResourceGuards {
 }
 
 
+import { createCrawlPolicy, type CrawlPolicy } from "@/modules/research/crawl-policy";
+
 // ─── Adapter Factories ───
 
 // Singletons per process (Next.js API routes share process)
@@ -64,6 +66,32 @@ let _search: SearchAdapter | null = null;
 let _scraper: ScraperAdapter | null = null;
 let _registry: RegistryAdapter | null = null;
 let _storage: StorageAdapter | null = null;
+let _crawlPolicy: CrawlPolicy | null = null;
+
+export function createCrawlPolicyAdapter(): CrawlPolicy {
+  if (_crawlPolicy) return _crawlPolicy;
+
+  const robotsScraper = new SafeDirectScraperAdapter({
+    timeoutMs: int(process.env.ROBOTS_TIMEOUT_MS, 3_000),
+    maxResponseBytes: int(process.env.ROBOTS_MAX_RESPONSE_BYTES, 131_072),
+    maxRedirects: 2,
+    minTextLength: 0,
+  });
+
+  _crawlPolicy = createCrawlPolicy(
+    async (robotsUrl, signal) => {
+      const res = await robotsScraper.extract(robotsUrl, { signal });
+      return res.html || res.text;
+    },
+    {
+      userAgent: process.env.CRAWL_USER_AGENT || "PartnerIQBot",
+      minDomainIntervalMs: int(process.env.CRAWL_MIN_DOMAIN_INTERVAL_MS, 1_000),
+      robotsCacheTtlMs: int(process.env.ROBOTS_CACHE_TTL_MS, 86_400_000),
+    },
+  );
+
+  return _crawlPolicy;
+}
 
 export function createLLMAdapter(): LLMAdapter {
   if (_llm) return _llm;
@@ -207,6 +235,7 @@ export function resetAdapters(): void {
   _scraper = null;
   _registry = null;
   _storage = null;
+  _crawlPolicy = null;
 }
 
 // ─── Helpers ───
@@ -216,3 +245,4 @@ function int(val: string | undefined, fallback: number): number {
   const parsed = parseInt(val, 10);
   return isNaN(parsed) || parsed <= 0 ? fallback : parsed;
 }
+
