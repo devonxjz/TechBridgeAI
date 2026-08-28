@@ -1,6 +1,6 @@
 import type { CompanyInput, RawFinding } from "@/lib/types";
 import type { SearchAdapter } from "@/adapters/search/types";
-import { buildResearchQueries } from "../queries";
+import { buildResearchQueries, applyDomainPolicy } from "../queries";
 
 /**
  * Search the web for company information.
@@ -16,19 +16,22 @@ export async function searchWeb(
 
   const resultsByQuery = await Promise.all(
     queries.map(async (query) => {
-      const results = await searchAdapter.search(query, {
-        maxResults: 5,
+      const rawResults = await searchAdapter.search(query, {
+        maxResults: 10,
         language: "vi",
         region: "vn",
+        vertical: "web",
       });
 
-      return results.map((result) => ({
+      const selectedResults = applyDomainPolicy(rawResults, input.sourcePolicy, 5);
+
+      return selectedResults.map((result) => ({
         source: "web_search" as const,
         url: result.url,
         content: `[${result.title}]\n${result.snippet}`,
         extractedAt: new Date(),
         confidence: 0.6,
-        metadata: { query, title: result.title },
+        metadata: { query, title: result.title, publisherName: result.publisherName },
       }));
     })
   );
@@ -39,5 +42,6 @@ export async function searchWeb(
 
   return findings;
 }
+
 
 

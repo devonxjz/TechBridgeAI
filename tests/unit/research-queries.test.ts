@@ -36,4 +36,18 @@ describe("buildResearchQueries", () => {
     expect(plan.news.length).toBeGreaterThan(0);
     expect(plan.web.length + plan.news.length).toBe(6);
   });
+
+  it("appends site constraints when domain policy is 'only'", () => {
+    const input = {
+      name: "FPT",
+      sourcePolicy: {
+        mode: "only" as const,
+        domains: ["vnexpress.net", "dantri.com.vn"],
+      },
+    };
+    const plan = buildResearchQueries(input, 6);
+    expect(plan.news[0]).toContain("site:vnexpress.net OR site:dantri.com.vn");
+    expect(plan.web[0]).toContain("site:vnexpress.net OR site:dantri.com.vn");
+  });
 });
+

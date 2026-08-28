@@ -57,6 +57,8 @@ export function createResearchSourceRunners(
       searchNews(
         input,
         bindSearchAdapter(deps.search, context),
+        bindScraperAdapter(deps.scraper, context),
+        undefined,
         buildResearchQueries(input, deps.guards.maxQueriesPerResearch).news,
       ),
     registry: (input, context) =>

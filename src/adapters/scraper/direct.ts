@@ -17,6 +17,7 @@ export interface DirectScraperLimits {
   timeoutMs: number;
   maxResponseBytes: number;
   maxRedirects: number;
+  minTextLength?: number;
   ca?: string | Buffer | Array<string | Buffer>;
 }
 
@@ -30,6 +31,7 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
       timeoutMs: 8_000,
       maxResponseBytes: 1_048_576,
       maxRedirects: 3,
+      minTextLength: 50,
     },
   ) {}
 
@@ -336,8 +338,9 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
             const titleMatch = fullHtml.match(/<title[^>]*>([^<]+)<\/title>/i);
             const title = titleMatch ? titleMatch[1].trim() : "";
             const cleanText = this.cleanHtml(fullHtml);
+            const minLength = this.limits.minTextLength ?? 50;
 
-            if (cleanText.length <= 50) {
+            if (cleanText.length <= minLength) {
               settleOnce(() => {
                 reject(new ScrapeError("Direct fetch returned empty text", "direct", "empty"));
               });
@@ -351,6 +354,7 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
                   url: target.url.toString(),
                   title,
                   text: cleanText.slice(0, 10000),
+                  html: fullHtml,
                   metadata: { provider: "direct" },
                 },
               });
@@ -360,6 +364,7 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
             settleOnce(() => reject(err));
           });
       });
+
 
       activeReq = req;
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { z } from "zod";
 import {
   MockLLMAdapter,
@@ -74,6 +74,79 @@ describe("Adapters Unit Tests", () => {
       expect(search.callLog.length).toBe(1);
     });
   });
+
+  describe("SerperSearchAdapter", () => {
+    it("calls news endpoint and maps publisher and date when vertical is news", async () => {
+      const { SerperSearchAdapter } = await import("@/adapters/search/serper");
+      const adapter = new SerperSearchAdapter("mock-key");
+
+      const originalFetch = globalThis.fetch;
+      try {
+        let calledUrl = "";
+        let calledBody: any = null;
+
+        globalThis.fetch = vi.fn().mockImplementation(async (url: string, init: any) => {
+          calledUrl = url;
+          calledBody = JSON.parse(init.body);
+          return {
+            ok: true,
+            json: async () => ({
+              news: [
+                {
+                  title: "FPT công bố lợi nhuận",
+                  link: "https://vnexpress.net/fpt-loi-nhuan",
+                  snippet: "Lợi nhuận quý tăng",
+                  source: "VnExpress",
+                  date: "1 ngày trước",
+                },
+              ],
+            }),
+          };
+        });
+
+        const results = await adapter.search("FPT lợi nhuận", { vertical: "news" });
+        expect(calledUrl).toBe("https://google.serper.dev/news");
+        expect(results.length).toBe(1);
+        expect(results[0].publisherName).toBe("VnExpress");
+        expect(results[0].publishedLabel).toBe("1 ngày trước");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("calls search endpoint when vertical is web or omitted", async () => {
+      const { SerperSearchAdapter } = await import("@/adapters/search/serper");
+      const adapter = new SerperSearchAdapter("mock-key");
+
+      const originalFetch = globalThis.fetch;
+      try {
+        let calledUrl = "";
+
+        globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+          calledUrl = url;
+          return {
+            ok: true,
+            json: async () => ({
+              organic: [
+                {
+                  title: "FPT Trang chủ",
+                  link: "https://fpt.com.vn",
+                  snippet: "Tập đoàn FPT",
+                },
+              ],
+            }),
+          };
+        });
+
+        const results = await adapter.search("FPT");
+        expect(calledUrl).toBe("https://google.serper.dev/search");
+        expect(results.length).toBe(1);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
 
   describe("MockScraperAdapter", () => {
     let scraper: MockScraperAdapter;

@@ -9,11 +9,56 @@
 // 6. Tax / Registry
 // ═══════════════════════════════════════════════════════
 
-import type { CompanyInput } from "@/lib/types";
+import type { CompanyInput, SourceDomainPolicy } from "@/lib/types";
+import type { SearchResult } from "@/adapters/search/types";
 
 export interface ResearchQueryPlan {
   web: string[];
   news: string[];
+}
+
+export function isDomainMatch(url: string, domains: readonly string[]): boolean {
+  if (!domains || domains.length === 0) return false;
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return domains.some((domain) => {
+      const d = domain.trim().toLowerCase();
+      return hostname === d || hostname.endsWith(`.${d}`);
+    });
+  } catch {
+    return false;
+  }
+}
+
+export function applyDomainPolicy(
+  results: readonly SearchResult[],
+  policy?: SourceDomainPolicy,
+  limit: number = 5
+): SearchResult[] {
+  if (!policy || policy.mode === "broad" || policy.domains.length === 0) {
+    return results.slice(0, limit);
+  }
+
+  if (policy.mode === "only") {
+    return results.filter((r) => isDomainMatch(r.url, policy.domains)).slice(0, limit);
+  }
+
+  if (policy.mode === "prefer") {
+    const matched: SearchResult[] = [];
+    const unmatched: SearchResult[] = [];
+
+    for (const r of results) {
+      if (isDomainMatch(r.url, policy.domains)) {
+        matched.push(r);
+      } else {
+        unmatched.push(r);
+      }
+    }
+
+    return [...matched, ...unmatched].slice(0, limit);
+  }
+
+  return results.slice(0, limit);
 }
 
 export function buildResearchQueries(
@@ -65,15 +110,23 @@ export function buildResearchQueries(
   const uniqueWeb = Array.from(new Set(webCandidates));
   const newsQueries = [newsActivityQuery, newsRiskQuery];
 
+  // If domain policy mode is "only", append site constraints
+  let siteClause = "";
+  if (input.sourcePolicy?.mode === "only" && input.sourcePolicy.domains.length > 0) {
+    const sites = input.sourcePolicy.domains.map((d) => `site:${d}`).join(" OR ");
+    siteClause = ` (${sites})`;
+  }
+
   // Guarantee at least 1-2 news queries if budget allows
   const maxNews = Math.min(2, Math.max(1, Math.floor(maxQueries / 3)));
-  const allocatedNews = newsQueries.slice(0, maxNews);
+  const allocatedNews = newsQueries.slice(0, maxNews).map((q) => (siteClause ? `${q}${siteClause}` : q));
   const remainingBudgetForWeb = Math.max(0, maxQueries - allocatedNews.length);
-  const allocatedWeb = uniqueWeb.slice(0, remainingBudgetForWeb);
+  const allocatedWeb = uniqueWeb.slice(0, remainingBudgetForWeb).map((q) => (siteClause ? `${q}${siteClause}` : q));
 
   return {
     web: allocatedWeb,
     news: allocatedNews,
   };
 }
+
 
