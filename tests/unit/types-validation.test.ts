@@ -55,7 +55,142 @@ describe("Domain Validation - CompanyInputSchema", () => {
     const result = CompanyInputSchema.safeParse(input);
     expect(result.success).toBe(false);
   });
+
+  it("validates SourceDomainPolicySchema with broad, prefer, and only modes", async () => {
+    const { SourceDomainPolicySchema } = await import("@/lib/types");
+    
+    // Broad mode can have empty domains
+    const broadResult = SourceDomainPolicySchema.safeParse({
+      mode: "broad",
+      domains: [],
+    });
+    expect(broadResult.success).toBe(true);
+
+    // Prefer mode normalizes domains
+    const preferResult = SourceDomainPolicySchema.safeParse({
+      mode: "prefer",
+      domains: ["  VNEXPRESS.NET  ", "dantri.com.vn", "vnexpress.net"],
+    });
+    expect(preferResult.success).toBe(true);
+    if (preferResult.success) {
+      expect(preferResult.data.domains).toEqual(["vnexpress.net", "dantri.com.vn"]);
+    }
+
+    // Only mode requires at least one domain
+    const emptyOnlyResult = SourceDomainPolicySchema.safeParse({
+      mode: "only",
+      domains: [],
+    });
+    expect(emptyOnlyResult.success).toBe(false);
+
+    // Rejects protocols, paths, or credentials in domains
+    expect(
+      SourceDomainPolicySchema.safeParse({
+        mode: "prefer",
+        domains: ["https://vnexpress.net"],
+      }).success,
+    ).toBe(false);
+
+    expect(
+      SourceDomainPolicySchema.safeParse({
+        mode: "prefer",
+        domains: ["vnexpress.net/news"],
+      }).success,
+    ).toBe(false);
+
+    // Caps at 20 domains
+    const over20 = Array.from({ length: 21 }, (_, i) => `domain${i}.com`);
+    expect(
+      SourceDomainPolicySchema.safeParse({
+        mode: "prefer",
+        domains: over20,
+      }).success,
+    ).toBe(false);
+  });
 });
+
+describe("Sprint 0 Provenance and Claim Verification Schemas", () => {
+  it("accepts a rich source citation and claim evidence with paywall and metadata_only", async () => {
+    const {
+      SourceCitationSchema,
+      ClaimEvidenceSchema,
+      CompanyProfileSchema,
+    } = await import("@/lib/types");
+
+    const citation = {
+      source: "news",
+      url: "https://vnexpress.net/kinh-doanh/fpt-mo-rong-ai",
+      accessedAt: "2026-08-28T00:00:00.000Z",
+      fieldsContributed: ["recentActivities"],
+      publication: {
+        title: "FPT mở rộng nghiên cứu AI",
+        publisherName: "VnExpress",
+        publisherDomain: "vnexpress.net",
+        authors: ["Nguyễn Văn A"],
+        publishedAt: "2026-08-28T07:00:00.000Z",
+        canonicalUrl: "https://vnexpress.net/kinh-doanh/fpt-mo-rong-ai",
+      },
+      previewPolicy: {
+        mode: "metadata_only",
+        paywallDetected: true,
+        isAccessibleForFree: false,
+        robotsDecision: "allowed",
+      },
+      signals: {
+        primarySource: false,
+        publisherIdentified: true,
+        authorIdentified: true,
+        publicationDateIdentified: true,
+        duplicateClusterSize: 1,
+      },
+      fetchMethod: "search_snippet",
+    };
+
+    const parsedCitation = SourceCitationSchema.safeParse(citation);
+    expect(parsedCitation.success).toBe(true);
+
+    const claim = {
+      supportingUrls: ["https://vnexpress.net/kinh-doanh/fpt-mo-rong-ai"],
+      conflictingUrls: [],
+      independentPublisherCount: 1,
+      status: "single_source",
+    };
+    const parsedClaim = ClaimEvidenceSchema.safeParse(claim);
+    expect(parsedClaim.success).toBe(true);
+  });
+
+  it("rejects invalid verification status, negative counts, and invalid URLs in claim evidence", async () => {
+    const { ClaimEvidenceSchema } = await import("@/lib/types");
+
+    expect(
+      ClaimEvidenceSchema.safeParse({
+        supportingUrls: ["https://vnexpress.net"],
+        conflictingUrls: [],
+        independentPublisherCount: 1,
+        status: "verified_true", // invalid status
+      }).success,
+    ).toBe(false);
+
+    expect(
+      ClaimEvidenceSchema.safeParse({
+        supportingUrls: ["https://vnexpress.net"],
+        conflictingUrls: [],
+        independentPublisherCount: -1, // negative count
+        status: "corroborated",
+      }).success,
+    ).toBe(false);
+
+    expect(
+      ClaimEvidenceSchema.safeParse({
+        supportingUrls: ["not-a-valid-url"], // invalid URL
+        conflictingUrls: [],
+        independentPublisherCount: 1,
+        status: "single_source",
+      }).success,
+    ).toBe(false);
+  });
+});
+
 
 describe("ResearchRequestSchema and ResearchSnapshotSchema", () => {
   const validProfileJson = {

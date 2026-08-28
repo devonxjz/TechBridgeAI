@@ -7,13 +7,66 @@ import { z } from "zod";
 
 // ─── Input ───
 
+export type DomainPolicyMode = "broad" | "prefer" | "only";
+
+export interface SourceDomainPolicy {
+  mode: DomainPolicyMode;
+  domains: string[];
+}
+
 export interface CompanyInput {
   name: string;
   website?: string;
   taxId?: string;
   linkedinUrl?: string;
   additionalKeywords?: string[];
+  sourcePolicy?: SourceDomainPolicy;
 }
+
+const domainHostnameRegex = /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
+
+export const SourceDomainPolicySchema = z.object({
+  mode: z.enum(["broad", "prefer", "only"]),
+  domains: z.array(z.string()).max(20),
+}).transform((policy, ctx) => {
+  const normalizedDomains: string[] = [];
+
+  for (const raw of policy.domains) {
+    const trimmed = raw.trim().toLowerCase();
+    if (!trimmed) continue;
+    if (
+      trimmed.includes("://") ||
+      trimmed.includes("/") ||
+      trimmed.includes("@") ||
+      trimmed.includes(":") ||
+      trimmed.includes("?") ||
+      trimmed.includes("#") ||
+      !domainHostnameRegex.test(trimmed)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Invalid domain format: ${raw}. Must be a valid hostname without protocol, path, port or credentials.`,
+      });
+      return z.NEVER;
+    }
+    if (!normalizedDomains.includes(trimmed)) {
+      normalizedDomains.push(trimmed);
+    }
+  }
+
+  if (policy.mode !== "broad" && normalizedDomains.length === 0) {
+    ctx.addIssue({
+      code: "custom",
+      message: `Domain policy mode "${policy.mode}" requires at least one valid domain.`,
+    });
+    return z.NEVER;
+  }
+
+  return {
+    mode: policy.mode,
+    domains: normalizedDomains,
+  };
+});
 
 export const CompanyInputSchema = z.object({
   name: z.string().min(1).max(200),
@@ -21,6 +74,7 @@ export const CompanyInputSchema = z.object({
   taxId: z.string().max(50).optional(),
   linkedinUrl: z.string().url().max(500).optional(),
   additionalKeywords: z.array(z.string().max(100)).max(5).optional(),
+  sourcePolicy: SourceDomainPolicySchema.optional(),
 });
 
 export function slugify(text: string): string {
@@ -33,7 +87,7 @@ export function slugify(text: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-// ─── Source types ───
+// ─── Source & Provenance types ───
 
 export type SourceName =
   | "web_search"
@@ -42,6 +96,71 @@ export type SourceName =
   | "news"
   | "linkedin";
 
+export type VerificationStatus =
+  | "primary_source"
+  | "corroborated"
+  | "single_source"
+  | "conflicting"
+  | "insufficient";
+
+export type PreviewMode = "short_excerpt" | "metadata_only";
+export type RobotsDecision = "allowed" | "disallowed" | "unknown";
+export type FetchMethod = "search_snippet" | "server_extract";
+
+export interface PublicationMetadata {
+  title?: string;
+  publisherName?: string;
+  publisherDomain: string;
+  authors: string[];
+  publishedAt?: string;
+  publishedLabel?: string;
+  modifiedAt?: string;
+  canonicalUrl?: string;
+  ampUrl?: string;
+}
+
+export interface PreviewPolicy {
+  mode: PreviewMode;
+  paywallDetected: boolean;
+  isAccessibleForFree?: boolean;
+  robotsDecision: RobotsDecision;
+  maxSnippetLength?: number;
+}
+
+export interface SourceSignals {
+  primarySource: boolean;
+  publisherIdentified: boolean;
+  authorIdentified: boolean;
+  publicationDateIdentified: boolean;
+  duplicateClusterSize: number;
+}
+
+export interface ClaimEvidence {
+  supportingUrls: string[];
+  conflictingUrls: string[];
+  independentPublisherCount: number;
+  status: VerificationStatus;
+}
+
+export const PROFILE_FIELDS = [
+  "officialName",
+  "tradingNames",
+  "taxId",
+  "industry",
+  "description",
+  "foundedYear",
+  "headquarters",
+  "website",
+  "keyPeople",
+  "products",
+  "markets",
+  "companySize",
+  "revenue",
+  "recentActivities",
+] as const;
+
+export type ProfileField = (typeof PROFILE_FIELDS)[number];
+
 export interface RawFinding {
   source: SourceName;
   url: string;
@@ -49,6 +168,12 @@ export interface RawFinding {
   extractedAt: Date;
   confidence: number; // 0.0 – 1.0
   metadata?: Record<string, unknown>;
+  publication?: PublicationMetadata;
+  previewPolicy?: PreviewPolicy;
+  signals?: SourceSignals;
+  excerpt?: string;
+  contentFingerprint?: string;
+  fetchMethod?: FetchMethod;
 }
 
 // ─── Company Profile ───
@@ -79,7 +204,13 @@ export interface SourceCitation {
   source: SourceName;
   url: string;
   accessedAt: Date;
-  fieldsContributed: string[];
+  fieldsContributed: ProfileField[] | string[];
+  publication?: PublicationMetadata;
+  previewPolicy?: PreviewPolicy;
+  signals?: SourceSignals;
+  excerpt?: string;
+  contentFingerprint?: string;
+  fetchMethod?: FetchMethod;
 }
 
 export type CompanySize =
@@ -126,8 +257,9 @@ export interface CompanyProfile {
   recentActivities: Activity[];
   lastUpdated: Date;
 
-  // Meta
+  // Meta & Provenance
   sources: SourceCitation[];
+  fieldEvidence?: Partial<Record<ProfileField, ClaimEvidence>>;
   overallConfidence: number;
   lowConfidence?: boolean;
 }
@@ -152,10 +284,18 @@ export interface ProfileDiff {
 
 // ─── Analysis Report ───
 
+export interface FitScoreCriteria {
+  name: string;
+  score: number;
+  weight: number;
+  reasoning?: string;
+  evidence?: ClaimEvidence;
+}
+
 export interface FitScore {
   score: number; // 0-100
   reasoning: string;
-  criteria: { name: string; score: number; weight: number; reasoning?: string }[];
+  criteria: FitScoreCriteria[];
 }
 
 export interface RiskFlag {
@@ -163,12 +303,14 @@ export interface RiskFlag {
   description: string;
   severity: "high" | "medium" | "low";
   source: SourceName;
+  evidence?: ClaimEvidence;
 }
 
 export interface SuggestedAction {
   action: string;
   priority: "high" | "medium" | "low";
   reasoning: string;
+  evidence?: ClaimEvidence;
 }
 
 export interface AnalysisReport {
@@ -178,6 +320,7 @@ export interface AnalysisReport {
   riskFlags: RiskFlag[];
   suggestedActions: SuggestedAction[];
   executiveSummary: string;
+  executiveSummaryEvidence?: ClaimEvidence;
 }
 
 export interface AnalysisContext {
@@ -220,6 +363,55 @@ export interface CacheSuggestion {
 
 // ─── Runtime Schemas for Cached Snapshot ───
 
+export const ProfileFieldSchema = z.enum(PROFILE_FIELDS);
+
+export const VerificationStatusSchema = z.enum([
+  "primary_source",
+  "corroborated",
+  "single_source",
+  "conflicting",
+  "insufficient",
+]);
+
+export const ClaimEvidenceSchema = z.object({
+  supportingUrls: z.array(z.string().url()),
+  conflictingUrls: z.array(z.string().url()),
+  independentPublisherCount: z.number().int().min(0),
+  status: VerificationStatusSchema,
+});
+
+export const PreviewModeSchema = z.enum(["short_excerpt", "metadata_only"]);
+export const RobotsDecisionSchema = z.enum(["allowed", "disallowed", "unknown"]);
+export const FetchMethodSchema = z.enum(["search_snippet", "server_extract"]);
+
+export const PublicationMetadataSchema = z.object({
+  title: z.string().optional(),
+  publisherName: z.string().optional(),
+  publisherDomain: z.string(),
+  authors: z.array(z.string()),
+  publishedAt: z.string().optional(),
+  publishedLabel: z.string().optional(),
+  modifiedAt: z.string().optional(),
+  canonicalUrl: z.string().url().optional(),
+  ampUrl: z.string().url().optional(),
+});
+
+export const PreviewPolicySchema = z.object({
+  mode: PreviewModeSchema,
+  paywallDetected: z.boolean(),
+  isAccessibleForFree: z.boolean().optional(),
+  robotsDecision: RobotsDecisionSchema,
+  maxSnippetLength: z.number().int().optional(),
+});
+
+export const SourceSignalsSchema = z.object({
+  primarySource: z.boolean(),
+  publisherIdentified: z.boolean(),
+  authorIdentified: z.boolean(),
+  publicationDateIdentified: z.boolean(),
+  duplicateClusterSize: z.number().int().min(0),
+});
+
 export const SourceNameSchema = z.enum([
   "web_search",
   "website",
@@ -255,6 +447,12 @@ export const SourceCitationSchema = z.object({
   url: z.string(),
   accessedAt: z.coerce.date(),
   fieldsContributed: z.array(z.string()),
+  publication: PublicationMetadataSchema.optional(),
+  previewPolicy: PreviewPolicySchema.optional(),
+  signals: SourceSignalsSchema.optional(),
+  excerpt: z.string().max(800).optional(),
+  contentFingerprint: z.string().optional(),
+  fetchMethod: FetchMethodSchema.optional(),
 });
 
 export const CompanySizeSchema = z.enum([
@@ -295,6 +493,7 @@ export const CompanyProfileSchema = z.object({
   recentActivities: z.array(ActivitySchema),
   lastUpdated: z.coerce.date(),
   sources: z.array(SourceCitationSchema),
+  fieldEvidence: z.record(ProfileFieldSchema, ClaimEvidenceSchema).optional(),
   overallConfidence: z.number().min(0).max(1),
   lowConfidence: z.boolean().optional(),
 });
@@ -320,6 +519,7 @@ export const FitScoreCriteriaSchema = z.object({
   score: z.number().min(0).max(100),
   weight: z.number(),
   reasoning: z.string().optional(),
+  evidence: ClaimEvidenceSchema.optional(),
 });
 
 export const FitScoreSchema = z.object({
@@ -333,12 +533,14 @@ export const RiskFlagSchema = z.object({
   description: z.string(),
   severity: z.enum(["high", "medium", "low"]),
   source: SourceNameSchema,
+  evidence: ClaimEvidenceSchema.optional(),
 });
 
 export const SuggestedActionSchema = z.object({
   action: z.string(),
   priority: z.enum(["high", "medium", "low"]),
   reasoning: z.string(),
+  evidence: ClaimEvidenceSchema.optional(),
 });
 
 export const AnalysisReportSchema = z.object({
@@ -348,6 +550,7 @@ export const AnalysisReportSchema = z.object({
   riskFlags: z.array(RiskFlagSchema),
   suggestedActions: z.array(SuggestedActionSchema),
   executiveSummary: z.string(),
+  executiveSummaryEvidence: ClaimEvidenceSchema.optional(),
 });
 
 export interface ResearchSnapshot {
