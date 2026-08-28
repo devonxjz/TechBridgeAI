@@ -29,6 +29,12 @@ vi.mock("@/config", () => ({
     return {};
   },
   createStorageAdapter: () => storage,
+  createCrawlPolicyAdapter: () => ({
+    beforeFetch: vi.fn().mockResolvedValue({
+      robotsDecision: "allowed",
+      shouldExtract: true,
+    }),
+  }),
   getGuards: () => ({
     maxConcurrentResearch: 1,
     maxQueriesPerResearch: 6,

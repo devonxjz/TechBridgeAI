@@ -366,5 +366,60 @@ describe("ResearchCache - Storage-backed Cache Module", () => {
       cacheInvalid: true,
     });
   });
+
+  it("persists and restores snapshot with rich publication citations and fieldEvidence", async () => {
+    const identity = { taxId: "0101248141", domain: "fpt.com.vn", name: "fpt" };
+    const richProfile: CompanyProfile = {
+      ...validProfile,
+      id: "fpt-corp",
+      fieldEvidence: {
+        officialName: {
+          status: "primary_source",
+          independentPublisherCount: 1,
+          supportingUrls: ["https://api.vietqr.io/mst"],
+          conflictingUrls: [],
+        },
+      },
+      sources: [
+        {
+          source: "news",
+          url: "https://vnexpress.net/fpt-1",
+          accessedAt: new Date(),
+          fieldsContributed: ["officialName"],
+          publication: {
+            publisherDomain: "vnexpress.net",
+            publisherName: "VnExpress",
+            authors: ["Nguyen Van A"],
+          },
+          previewPolicy: {
+            mode: "short_excerpt",
+            paywallDetected: false,
+            robotsDecision: "allowed",
+          },
+          signals: {
+            primarySource: false,
+            publisherIdentified: true,
+            authorIdentified: true,
+            publicationDateIdentified: false,
+            duplicateClusterSize: 1,
+          },
+          excerpt: "Doanh thu FPT",
+          contentFingerprint: "fp-1",
+          fetchMethod: "server_extract",
+        },
+      ],
+    };
+
+    await storage.resolveOrCreateIdentity(identity, "fpt-corp");
+    const persisted = await cache.persist(identity, {
+      profile: richProfile,
+      report: validReport,
+      diff: null,
+    });
+
+    expect(persisted.profile.sources[0].publication?.publisherName).toBe("VnExpress");
+    expect(persisted.profile.fieldEvidence?.officialName?.status).toBe("primary_source");
+  });
 });
+
 
