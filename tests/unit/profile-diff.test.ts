@@ -89,4 +89,59 @@ describe("Profile Diff Engine Unit Tests", () => {
     expect(peopleChange?.significance).toBe("high");
     expect(diff.summary).toContain("keyPeople");
   });
+
+  it("builds profile with rich source citations and field evidence mapping", async () => {
+    const customLLM: any = {
+      completeStructured: async () => ({
+        officialName: "CÔNG TY CỔ PHẦN FPT",
+        tradingNames: ["FPT Corporation"],
+        taxId: "0101248141",
+        industry: ["Công nghệ thông tin"],
+        description: "FPT là tập đoàn công nghệ hàng đầu Việt Nam.",
+        foundedYear: 1988,
+        headquarters: {
+          street: "10 Phạm Văn Bạch",
+          city: "Hà Nội",
+          country: "Việt Nam",
+        },
+        website: "https://fpt.com.vn",
+        keyPeople: [{ name: "Trương Gia Bình", title: "Chủ tịch HĐQT" }],
+        products: ["FPT Cloud", "AI Solutions"],
+        markets: ["Toàn cầu", "Việt Nam"],
+        companySize: "1000+",
+        recentActivities: [],
+        fieldEvidence: {
+          officialName: {
+            supportingUrls: ["https://api.vietqr.io/mst"],
+            conflictingUrls: [],
+          },
+          taxId: {
+            supportingUrls: ["https://api.vietqr.io/mst"],
+            conflictingUrls: [],
+          },
+        },
+      }),
+    };
+
+    const module = createProfileModule({ llm: customLLM });
+    const profile = await module.buildProfile(
+      [
+        {
+          source: "registry",
+          url: "https://api.vietqr.io/mst",
+          content: "CÔNG TY CỔ PHẦN FPT MST 0101248141",
+          confidence: 0.95,
+          extractedAt: new Date(),
+        },
+      ],
+      { name: "FPT", website: "https://fpt.com.vn" }
+    );
+
+    expect(profile.sources).toHaveLength(1);
+    expect(profile.sources[0].signals?.primarySource).toBe(true);
+    expect(profile.sources[0].fieldsContributed).toContain("officialName");
+    expect(profile.sources[0].fieldsContributed).toContain("taxId");
+    expect(profile.fieldEvidence?.officialName?.status).toBe("primary_source");
+  });
 });
+
