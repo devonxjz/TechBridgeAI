@@ -104,3 +104,40 @@
 
 **Final Status**: All Waves Completed & Verified (23 Suites | 136/136 Tests Passed + Build Clean + Lint Clean + Types Clean) 🚀
 
+---
+
+## Task 4: Evidence Provenance & In-App Source Preview (TASK-4) ✅ COMPLETE
+
+### Sprint 0: Baseline, contracts và runtime schemas ✅ COMPLETE
+- [x] T4.S0: Source signals, claim verification, domain policy và rich citation schemas (`37935c2`)
+
+### Sprint 1: News acquisition ✅ COMPLETE
+- [x] T4.S1: Serper News, publication metadata normalizer, excerpt và paywall policy (`f1affd0`)
+
+### Sprint 2: Respectful crawling ✅ COMPLETE
+- [x] T4.S2: Robots decision, per-domain throttle, metadata cache và extraction rollback flag (`1171b5f`)
+
+### Sprint 3: Evidence normalization ✅ COMPLETE
+- [x] T4.S3: Canonical dedupe, copy clusters và independent-source verification (`30779e3`)
+
+### Sprint 4: Profile provenance ✅ COMPLETE
+- [x] T4.S4: Field-level citations, conflicts, recent activity URLs và fieldsContributed (`a1bfc74`)
+
+### Sprint 5: Analyst provenance ✅ COMPLETE
+- [x] T4.S5: Evidence-backed criteria, risks, actions và executive summary (`f209d80`)
+
+### Sprint 6: Stream and cache continuity ✅ COMPLETE
+- [x] T4.S6: Enriched SSE previews, JSONB round-trip và legacy cache handling (`07059e2`)
+
+### Sprint 7: In-app source experience ✅ COMPLETE
+- [x] T4.S7: Native evidence dialog, transparent metadata states và remove Google fallbacks (`dcc0d0c`)
+
+### Sprint 8: Release gate ✅ COMPLETE
+- [x] T4.S8: Full regression, security, visual, publisher smoke matrix và legal/product checklist
+
+**Detailed ticket:** [`docs/ticket/TASK-4.md`](TASK-4.md)
+
+**Research basis:** [`docs/research/2026-08-28-news-source-trust.md`](../research/2026-08-28-news-source-trust.md)
+
+**Final Status**: All Sprints Completed & Verified (31 Suites | 239/239 Tests Passed + Build Clean + Types Clean) 🚀
+

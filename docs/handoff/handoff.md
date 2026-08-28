@@ -2,52 +2,56 @@
 
 > **Repository**: [devonxjz/TechBridgeAI](https://github.com/devonxjz/TechBridgeAI)  
 > **Current Version**: `0.0.2`  
-> **Branch**: `codex/partneriq-langgraph-langfuse`  
-> **Status**: ✅ **LangGraph StateGraph & Langfuse Cloud Observability Fully Integrated** (155/155 tests passing across 23 test suites; latest UI/query-budget fixes are uncommitted).
+> **Status**: ✅ **TASK-4: Evidence Provenance & In-App Source Preview Fully Implemented & Verified** (239/239 tests passing across 31 test suites, Next.js build clean, TypeScript typecheck clean).
 
 ### Current Session Handoff
 
-- TASK-3 quality work is implemented in the working tree but has not been committed or pushed. Do not reset or discard existing changes in `.gitignore` or this handoff file.
-- Website-source behavior was corrected: when website discovery has no remaining search-query budget, it returns `skipped`/`0 results` instead of a source failure. A supplied URL still uses the direct scraper path.
-- The result form now preserves the last submitted company name and website, so the UI does not fall back to the `https://fpt.com.vn` placeholder after submit.
-- The profile result column/card now uses `min-w-0` to prevent long profile content from expanding beyond the viewport.
-- Latest verification: `npm test` passed 155/155; `npm run lint` passed with one pre-existing `@next/next/no-img-element` warning in `src/app/page.tsx`; `npm run typecheck` and `npm run build` passed.
-- Key files for the latest fixes: `src/modules/research/budget.ts`, `src/modules/workflow/index.ts`, `src/app/hooks/use-research.ts`, `src/app/components/research-form.tsx`, `src/app/page.tsx`, `src/app/components/profile-card.tsx`, and `tests/integration/research-workflow.test.ts`.
-- Next recommended check: run the app in a browser and verify both cases—(1) no website URL, where Website should show skipped/0 results without a fatal error; (2) a real submitted URL, where Website should scrape directly. Inspect the request payload if the second case still reports query-budget exhaustion.
+- **Task 4 (Sprints 0–8)** has been completely implemented, tested, and verified.
+- **Sprint 0 (`feat(evidence): define provenance contracts`)**: Runtime types and Zod schemas for `VerificationStatus`, `PreviewMode`, `RobotsDecision`, `FetchMethod`, `PublicationMetadata`, `PreviewPolicy`, `SourceSignals`, `ClaimEvidence`, `SourceDomainPolicy`, `ProfileField`.
+- **Sprint 1 (`feat(news): extract publication metadata`)**: Serper News vertical integration (`/news` endpoint), `SafeDirectScraperAdapter` transient HTML support, publication metadata normalizer (`cheerio@1.2.0`, JSON-LD extraction, OpenGraph, Canonical & AMP URLs, paywall detection, snippet control enforcement).
+- **Sprint 2 (`feat(crawl): respect publisher fetch policy`)**: `CrawlPolicy` politeness engine (`robots-parser@3.0.1`, 24h origin cache, process-local domain throttling interval, abort signal propagation).
+- **Sprint 3 (`feat(evidence): normalize citations and count independent sources`)**: `prepareEvidence`, `toSourceCitations`, SHA-256 content fingerprint deduplication, `buildClaimEvidence` with independent publisher counting.
+- **Sprint 4 (`feat(profile): integrate field-level evidence and provenance citations`)**: `ProfileModule` field-level claim validation, `fieldsContributed` attribution on citations, fallback claim resolution.
+- **Sprint 5 (`feat(analyst): resolve claim evidence for fit criteria and risk flags`)**: `AnalystModule` claim evidence resolution across Collaboration Fit Score criteria, Risk Flags, and Suggested Actions.
+- **Sprint 6 (`feat(serialization): preserve rich provenance in cache and export payloads`)**: JSONB snapshot multi-version cache serialization, markdown & PDF export preservation.
+- **Sprint 7 (`feat(ui): add in-app source preview dialog and field provenance`)**: In-app `SourcePreviewDialog` modal dialog, `EvidenceBadge` status indicators, field provenance inspection, interactive citation preview.
+- **Sprint 8 (`docs(evidence): complete TASK-4 evidence provenance and in-app preview`)**: Full test suite green (239 tests in 31 suites), Next.js production build verified, release gates green.
 
 ---
 
 ## 1. Project Overview & Architecture
 
 **PartnerIQ (TechBridgeAI)** is an AI-powered corporate intelligence and partnership assessment platform tailored for Vietnamese enterprises. It provides:
-1. **Multi-Source Parallel Autonomous Research**: Gathers corporate intelligence across 5 bounded parallel sources (*VietQR/MST Registry, Official Website, Business News, Web Search, Key People/LinkedIn*).
-2. **Deterministic Evidence Engine**: Sanitizes URLs, deduplicates findings, scores confidence, and deterministically sorts evidence.
-3. **AI Structured Profile Synthesis**: Builds typed, schema-validated `CompanyProfile` documents using LangChain-backed LLM adapters (`gpt-4o-mini`).
-4. **Collaboration Fit Scoring (AnalystModule)**: Evaluates partnership potential (0–100) across 5 weighted criteria (*Industry Alignment 30%, Recent Activity 20%, Size Match 20%, Geographic Relevance 15%, Digital Maturity 15%*) with risk flags and prioritized actionable steps.
-5. **"What Changed?" Diff Engine**: Computes schema-level diffs across profile iterations.
-6. **Supabase PostgreSQL Multi-Versioning**: Persists versioned snapshots (`company_profiles`, `company_diffs`) using subcollection-style JSONB columns.
-7. **Langfuse Cloud Tracing & Privacy Minimization**: End-to-end tracing via OpenTelemetry (`@langfuse/otel`), LangChain callbacks (`@langfuse/langchain`), client-side PII masking, and deterministic quality scoring.
+1. **Multi-Source Parallel Autonomous Research**: Gathers corporate intelligence across 5 bounded parallel sources (*VietQR/MST Registry, Official Website, Business News via Serper News, Web Search, Key People/LinkedIn*).
+2. **Polite Crawling & Provenance Engine**: Respects `robots.txt` directives, per-domain throttle spacing, paywall and `nosnippet` policies, and content fingerprinting.
+3. **Deterministic Evidence Engine**: Sanitizes URLs, deduplicates findings, scores confidence, counts independent publisher domains, and deterministically sorts evidence.
+4. **AI Structured Profile Synthesis**: Builds typed, schema-validated `CompanyProfile` documents with field-level claim evidence using LangChain-backed LLM adapters (`gpt-4o-mini`).
+5. **Collaboration Fit Scoring (AnalystModule)**: Evaluates partnership potential (0–100) across 5 weighted criteria (*Industry Alignment 30%, Recent Activity 20%, Size Match 20%, Geographic Relevance 15%, Digital Maturity 15%*) with risk flags and actionable steps backed by claim evidence.
+6. **In-App Source Preview**: Inspects article excerpts, publisher metadata, paywall notices, and direct links without speculative Google fallbacks.
+7. **"What Changed?" Diff Engine**: Computes schema-level diffs across profile iterations.
+8. **Supabase PostgreSQL Multi-Versioning**: Persists versioned snapshots (`company_profiles`, `company_diffs`) using subcollection-style JSONB columns.
+9. **Langfuse Cloud Tracing & Privacy Minimization**: End-to-end tracing via OpenTelemetry (`@langfuse/otel`), LangChain callbacks (`@langfuse/langchain`), client-side PII masking, and deterministic quality scoring.
 
 ```mermaid
 flowchart TD
     START([POST /api/research]) --> FanOut{Parallel Fan-Out\nmaxConcurrency: 3}
     FanOut --> WebSearch[source.web_search\nSerper API]
     FanOut --> Website[source.website\nTiered Scraper]
-    FanOut --> News[source.news\nSerper News]
+    FanOut --> News[source.news\nSerper News + CrawlPolicy]
     FanOut --> Registry[source.registry\nVietQR MST API]
     FanOut --> LinkedIn[source.linkedin\nProfile Search]
     
-    WebSearch --> FanIn[evidence.prepare\nURL Canonicalization & Dedup]
+    WebSearch --> FanIn[evidence.prepare\nURL Canonicalization & Dedup & Fingerprints]
     Website --> FanIn
     News --> FanIn
     Registry --> FanIn
     LinkedIn --> FanIn
     
     FanIn --> LoadProfile[profile.load\nSupabase Storage]
-    LoadProfile --> BuildProfile[profile.build\nLLM Structured Output]
+    LoadProfile --> BuildProfile[profile.build\nLLM Structured Output + Field Evidence]
     BuildProfile --> PersistProfile[profile.persist\nSave v(n) to Supabase]
     PersistProfile --> DiffProfile[profile.diff\nCompute Diff vs Existing]
-    DiffProfile --> Analyze[analyst.analyze\n5-factor Fit Score]
+    DiffProfile --> Analyze[analyst.analyze\n5-factor Fit Score + Claim Evidence]
     Analyze --> EndNode([SSE Stream End & Langfuse Flush])
 
     subgraph Observability ["🔭 Langfuse Observability & Privacy Boundary"]
@@ -64,15 +68,16 @@ flowchart TD
 
 | Component / Layer | Implementation Details | Verification Status |
 | :--- | :--- | :---: |
-| **LangGraph Workflow** | `src/modules/workflow/index.ts` StateGraph with 5 fan-out nodes, deterministic fan-in, custom SSE event dispatching. | ✅ 155/155 tests passing |
+| **Evidence Provenance (TASK-4)** | Serper News, `CrawlPolicy`, `normalizePublication`, `buildClaimEvidence`, `SourcePreviewDialog`, `EvidenceBadge`. | ✅ 239/239 tests passing |
+| **LangGraph Workflow** | `src/modules/workflow/index.ts` StateGraph with 5 fan-out nodes, deterministic fan-in, custom SSE event dispatching. | ✅ Tested & verified |
 | **Budget & Guard Rails** | `src/modules/research/budget.ts` tracking LLM token limits, call counts, provider concurrency. | ✅ Tested & verified |
-| **Research Matrix & Evidence** | `src/modules/research/queries.ts` & `src/modules/research/evidence.ts` with deterministic ordering & query allocation. | ✅ Tested & verified |
+| **Research Matrix & Evidence** | `src/modules/research/queries.ts` & `src/modules/research/evidence.ts` with domain policies & query allocation. | ✅ Tested & verified |
 | **Tiered Scraper Engine** | `SafeDirectScraperAdapter` -> `JinaReaderScraperAdapter` -> `TinyFishScraperAdapter` with SSRF protection. | ✅ Tested & verified |
 | **Registry Adapter** | `VietQrRegistryAdapter` for official Vietnamese tax code (MST) lookup. | ✅ Tested & verified |
 | **Langfuse Cloud Tracing** | `@langfuse/otel` (NodeSDK in `instrumentation.ts`), `@langfuse/langchain` (`CallbackHandler`), `@langfuse/tracing`, deterministic scoring. | ✅ Live trace tested |
 | **Privacy Minimization** | Client-side PII redactor (`maskPartnerIqTelemetry`) masking tokens, emails, phone numbers, raw source dumps. | ✅ Tested & verified |
 | **Storage & Multi-versioning** | `SupabaseStorageAdapter` with JSONB tables (`company_profiles`, `company_diffs`). | ✅ Tested & verified |
-| **UI & Real-Time SSE** | Dark mode glassmorphism UI with real-time SSE progress, profile cards, PDF export. | ✅ Operational |
+| **UI & Real-Time SSE** | Dark mode glassmorphism UI with real-time SSE progress, profile cards, source preview dialog, PDF export. | ✅ Operational |
 
 ---
 

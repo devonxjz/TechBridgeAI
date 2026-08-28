@@ -15,6 +15,12 @@ vi.mock("@/config", () => ({
   createScraperAdapter: () => ({}),
   createRegistryAdapter: () => ({}),
   createStorageAdapter: () => mockStorage,
+  createCrawlPolicyAdapter: () => ({
+    beforeFetch: vi.fn().mockResolvedValue({
+      robotsDecision: "allowed",
+      shouldExtract: true,
+    }),
+  }),
   getGuards: () => ({}),
 }));
 vi.mock("@/modules/profile", () => ({ createProfileModule: () => ({}) }));
