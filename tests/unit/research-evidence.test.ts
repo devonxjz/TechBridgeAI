@@ -97,3 +97,178 @@ describe("prepareEvidence", () => {
     expect(prepareEvidence([f1, f2, sk]).sourceCoverage).toBe(0);
   });
 });
+
+describe("Sprint 3 Evidence Normalization & Claim Validation", () => {
+  it("groups copied content by fingerprint so three republished articles count as 1 independent source", async () => {
+    const { toSourceCitations, buildClaimEvidence } = await import("@/modules/research/evidence");
+
+    const fingerprint = "shared-article-sha256-fingerprint";
+
+    const findings: RawFinding[] = [
+      {
+        source: "news",
+        url: "https://site-a.com/news-1",
+        content: "Nội dung bài viết sao chép",
+        extractedAt: new Date(),
+        confidence: 0.65,
+        publication: {
+          publisherDomain: "site-a.com",
+          publisherName: "Site A",
+          authors: ["Author 1"],
+        },
+        contentFingerprint: fingerprint,
+      },
+      {
+        source: "news",
+        url: "https://site-b.com/news-copy",
+        content: "Nội dung bài viết sao chép",
+        extractedAt: new Date(),
+        confidence: 0.65,
+        publication: {
+          publisherDomain: "site-b.com",
+          publisherName: "Site B",
+          authors: [],
+        },
+        contentFingerprint: fingerprint,
+      },
+      {
+        source: "news",
+        url: "https://site-c.com/news-mirror",
+        content: "Nội dung bài viết sao chép",
+        extractedAt: new Date(),
+        confidence: 0.65,
+        publication: {
+          publisherDomain: "site-c.com",
+          publisherName: "Site C",
+          authors: [],
+        },
+        contentFingerprint: fingerprint,
+      },
+    ];
+
+    const citations = toSourceCitations(findings, "https://fpt.com.vn");
+    expect(citations).toHaveLength(3);
+    expect(citations[0].signals?.duplicateClusterSize).toBe(3);
+
+    const claimEvidence = buildClaimEvidence(
+      {
+        supportingUrls: [
+          "https://site-a.com/news-1",
+          "https://site-b.com/news-copy",
+          "https://site-c.com/news-mirror",
+        ],
+      },
+      citations,
+    );
+
+    expect(claimEvidence.independentPublisherCount).toBe(1);
+    expect(claimEvidence.status).toBe("single_source");
+  });
+
+  it("produces corroborated status when two distinct publisher domains with different fingerprints support a claim", async () => {
+    const { toSourceCitations, buildClaimEvidence } = await import("@/modules/research/evidence");
+
+    const findings: RawFinding[] = [
+      {
+        source: "news",
+        url: "https://vnexpress.net/bai-1",
+        content: "FPT đạt doanh thu kỷ lục",
+        extractedAt: new Date(),
+        confidence: 0.7,
+        publication: { publisherDomain: "vnexpress.net", publisherName: "VnExpress", authors: ["Tác giả A"] },
+        contentFingerprint: "fingerprint-vnexpress",
+      },
+      {
+        source: "news",
+        url: "https://dantri.com.vn/bai-2",
+        content: "FPT công bố lợi nhuận tăng mạnh",
+        extractedAt: new Date(),
+        confidence: 0.7,
+        publication: { publisherDomain: "dantri.com.vn", publisherName: "Dân Trí", authors: ["Tác giả B"] },
+        contentFingerprint: "fingerprint-dantri",
+      },
+    ];
+
+    const citations = toSourceCitations(findings);
+    const claim = buildClaimEvidence(
+      {
+        supportingUrls: ["https://vnexpress.net/bai-1", "https://dantri.com.vn/bai-2"],
+      },
+      citations,
+    );
+
+    expect(claim.independentPublisherCount).toBe(2);
+    expect(claim.status).toBe("corroborated");
+  });
+
+  it("produces primary_source status for official registry or company website citations", async () => {
+    const { toSourceCitations, buildClaimEvidence } = await import("@/modules/research/evidence");
+
+    const findings: RawFinding[] = [
+      {
+        source: "registry",
+        url: "https://api.vietqr.io/v2/business/0101248141",
+        content: "CÔNG TY CỔ PHẦN FPT - MST 0101248141",
+        extractedAt: new Date(),
+        confidence: 0.95,
+      },
+    ];
+
+    const citations = toSourceCitations(findings, "https://fpt.com.vn");
+    const claim = buildClaimEvidence(
+      { supportingUrls: ["https://api.vietqr.io/v2/business/0101248141"] },
+      citations,
+    );
+
+    expect(claim.status).toBe("primary_source");
+    expect(claim.independentPublisherCount).toBe(1);
+  });
+
+  it("discards unknown URLs not in citations allowlist and resolves conflicting URLs", async () => {
+    const { toSourceCitations, buildClaimEvidence } = await import("@/modules/research/evidence");
+
+    const findings: RawFinding[] = [
+      {
+        source: "news",
+        url: "https://vnexpress.net/fpt-1",
+        content: "FPT mở rộng sang AI",
+        extractedAt: new Date(),
+        confidence: 0.7,
+        publication: { publisherDomain: "vnexpress.net", authors: [] },
+        contentFingerprint: "fp-1",
+      },
+      {
+        source: "news",
+        url: "https://dantri.com.vn/fpt-conflict",
+        content: "FPT phủ nhận mở rộng sang AI",
+        extractedAt: new Date(),
+        confidence: 0.7,
+        publication: { publisherDomain: "dantri.com.vn", authors: [] },
+        contentFingerprint: "fp-2",
+      },
+    ];
+
+    const citations = toSourceCitations(findings);
+
+    // Case 1: Unknown URL discarded
+    const unknownClaim = buildClaimEvidence(
+      { supportingUrls: ["https://invented-site.com/fake"] },
+      citations,
+    );
+    expect(unknownClaim.supportingUrls).toEqual([]);
+    expect(unknownClaim.status).toBe("insufficient");
+
+    // Case 2: Conflicting URL wins over supporting and resolves to conflicting
+    const conflictClaim = buildClaimEvidence(
+      {
+        supportingUrls: ["https://vnexpress.net/fpt-1", "https://dantri.com.vn/fpt-conflict"],
+        conflictingUrls: ["https://dantri.com.vn/fpt-conflict"],
+      },
+      citations,
+    );
+    expect(conflictClaim.supportingUrls).toEqual(["https://vnexpress.net/fpt-1"]);
+    expect(conflictClaim.conflictingUrls).toEqual(["https://dantri.com.vn/fpt-conflict"]);
+    expect(conflictClaim.status).toBe("conflicting");
+  });
+});
+
