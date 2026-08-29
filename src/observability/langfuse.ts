@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════
 // Langfuse Observability & Privacy Minimization
-// Provides client-side masking, deterministic scoring, and OTel/LangChain callback
+// Provides client-side masking, deterministic scoring, and OTel tracing
 // ═══════════════════════════════════════════════════════
 
 import { LangfuseClient } from "@langfuse/client";

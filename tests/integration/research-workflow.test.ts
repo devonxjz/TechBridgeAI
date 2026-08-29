@@ -12,7 +12,7 @@ import type { SearchOptions } from "@/adapters/search/types";
 import type { ResourceGuards } from "@/config";
 import type { CompanyInput, StreamEvent } from "@/lib/types";
 
-describe("ResearchWorkflow (LangGraph StateGraph)", () => {
+describe("ResearchWorkflow (native executor)", () => {
   let llm: MockLLMAdapter;
   let search: MockSearchAdapter;
   let scraper: MockScraperAdapter;
