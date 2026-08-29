@@ -12,7 +12,7 @@ import type { SearchOptions } from "@/adapters/search/types";
 import type { ResourceGuards } from "@/config";
 import type { CompanyInput, StreamEvent } from "@/lib/types";
 
-describe("ResearchWorkflow (LangGraph StateGraph)", () => {
+describe("ResearchWorkflow (native executor)", () => {
   let llm: MockLLMAdapter;
   let search: MockSearchAdapter;
   let scraper: MockScraperAdapter;
@@ -491,6 +491,75 @@ describe("ResearchWorkflow (LangGraph StateGraph)", () => {
         e.event === "research:progress"
     );
     expect(progressEvents.some((p) => p.data.status === "failed")).toBe(true);
+  });
+
+  it("emits a finding before slower sibling sources finish", async () => {
+    guards.maxQueriesPerResearch = 2;
+    guards.maxScrapePagesPerResearch = 1;
+    search.setResults("FPT", [
+      { title: "FPT", url: "https://fpt.com.vn", snippet: "FPT overview" },
+    ]);
+    let slowSourceFinished = false;
+    scraper.extract = async (url: string) => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      slowSourceFinished = true;
+      return {
+        url,
+        title: "FPT",
+        text: "FPT company website content long enough for profile synthesis.",
+      };
+    };
+    let findingArrivedEarly = false;
+
+    for await (const event of buildWorkflow().stream(
+      { name: "FPT", website: "https://fpt.com.vn" },
+      { researchRunId: "early-finding" },
+    )) {
+      if (event.event === "research:finding" && !slowSourceFinished) {
+        findingArrivedEarly = true;
+      }
+    }
+
+    expect(findingArrivedEarly).toBe(true);
+  });
+
+  it("produces equivalent terminal state through run and stream", async () => {
+    guards.maxQueriesPerResearch = 2;
+    guards.maxScrapePagesPerResearch = 1;
+    search.setResults("FPT", [
+      { title: "FPT", url: "https://fpt.com.vn", snippet: "FPT overview" },
+    ]);
+    scraper.extract = async (url: string) => ({
+      url,
+      title: "FPT",
+      text: "FPT company website content long enough for profile synthesis.",
+    });
+    const workflow = buildWorkflow();
+    const input = { name: "FPT", website: "https://fpt.com.vn" };
+    const runState = await workflow.run(input, { researchRunId: "equivalent" });
+    let streamState: typeof runState | undefined;
+    let completionCalls = 0;
+
+    for await (const event of workflow.stream(input, {
+      researchRunId: "equivalent",
+      onComplete: (state) => {
+        completionCalls += 1;
+        streamState = state;
+      },
+    })) {
+      void event;
+    }
+
+    const projectState = (state: typeof runState) => ({
+      outcome: state.outcome,
+      sources: state.sourceResults.map(({ source, status }) => ({ source, status })),
+      findingUrls: state.findings.map(({ url }) => url),
+      profileName: state.profile?.officialName,
+      hasAnalysis: Boolean(state.report),
+    });
+    expect(completionCalls).toBe(1);
+    expect(streamState).toBeDefined();
+    expect(projectState(streamState!)).toEqual(projectState(runState));
   });
 
   it("skips linkedin when no linkedinUrl is provided", async () => {

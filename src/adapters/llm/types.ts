@@ -11,7 +11,6 @@ export interface LLMBudget {
 
 export interface LLMInvocationContext {
   signal?: AbortSignal;
-  callbacks?: readonly unknown[];
   budget?: LLMBudget;
 }
 
@@ -21,6 +20,7 @@ export interface LLMOptions {
   maxTokens?: number;
   systemPrompt?: string;
   context?: LLMInvocationContext;
+  schemaName?: string;
 }
 
 export interface LLMUsageLog {
@@ -32,16 +32,9 @@ export interface LLMUsageLog {
 }
 
 export interface LLMAdapter {
-  complete(prompt: string, options?: LLMOptions): Promise<string>;
   completeStructured<T>(
     prompt: string,
     schema: z.ZodSchema<T>,
     options?: LLMOptions
   ): Promise<T>;
-  stream(
-    prompt: string,
-    options?: LLMOptions
-  ): AsyncGenerator<string, void, unknown>;
-  getUsageLogs?(): LLMUsageLog[];
 }
-

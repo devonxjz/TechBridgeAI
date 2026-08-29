@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════
-// Research source runners used by the LangGraph workflow.
+// Research source runners used by the native workflow.
 // ═══════════════════════════════════════════════════════
 
 import type {

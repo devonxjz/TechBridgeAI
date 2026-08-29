@@ -46,7 +46,6 @@ import {
   maskPartnerIqTelemetry,
   maskPartnerIqTelemetryData,
   calculateDeterministicScores,
-  createLangfuseCallback,
   emitResearchScores,
   flushLangfuse,
   initOpenTelemetry,
@@ -217,20 +216,6 @@ describe("Langfuse Observability & Privacy Minimization", () => {
     expect(scores).toContainEqual({ name: "profile_confidence", value: 0.88 });
     expect(scores).toContainEqual({ name: "analysis_schema_valid", value: 1 });
     expect(scores).toContainEqual({ name: "research_success", value: "partial" });
-  });
-
-  it("returns no-op / null handler when LANGFUSE_ENABLED is false", () => {
-    const prev = process.env.LANGFUSE_ENABLED;
-    process.env.LANGFUSE_ENABLED = "false";
-
-    const handler = createLangfuseCallback({
-      researchRunId: "run-1",
-      companyId: "fpt",
-      requestedSources: ["web_search"],
-    });
-
-    expect(handler).toBeNull();
-    process.env.LANGFUSE_ENABLED = prev;
   });
 
   it("creates one workflow observation under the research trace", async () => {

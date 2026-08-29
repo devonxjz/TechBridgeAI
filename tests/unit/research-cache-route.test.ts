@@ -73,7 +73,6 @@ vi.mock("@/modules/workflow", () => ({
 }));
 
 vi.mock("@/observability/langfuse", () => ({
-  createLangfuseCallback: () => null,
   emitResearchScores: vi.fn(async () => undefined),
   flushLangfuse: vi.fn(async () => undefined),
   traceResearch: async (_context: unknown, task: (traceId: string) => Promise<void>) =>

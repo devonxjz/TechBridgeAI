@@ -1,166 +1,95 @@
-// ═══════════════════════════════════════════════════════
-// OpenAI LLM Adapter — LangChain Implementation
-// Implements LLMAdapter using @langchain/openai and @langchain/core
-// ═══════════════════════════════════════════════════════
-
-import { ChatOpenAI } from "@langchain/openai";
-import {
-  AIMessage,
-  BaseMessage,
-  HumanMessage,
-  SystemMessage,
-} from "@langchain/core/messages";
-import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import type { Callbacks } from "@langchain/core/callbacks/manager";
-import { z } from "zod";
+import OpenAI from "openai";
+import { zodTextFormat } from "openai/helpers/zod";
+import type { z } from "zod";
 import type { LLMAdapter, LLMOptions, LLMUsageLog } from "./types";
 
 const DEFAULT_MODEL = "gpt-4o-mini";
 
+interface ParsedResponse {
+  output_parsed: unknown | null;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+  } | null;
+}
+
+interface OpenAIClientLike {
+  responses: {
+    parse(
+      body: unknown,
+      options?: { signal?: AbortSignal },
+    ): Promise<ParsedResponse>;
+  };
+}
+
 export interface OpenAIAdapterOptions {
-  modelFactory?: (options?: LLMOptions) => BaseChatModel;
+  client?: OpenAIClientLike;
 }
 
 export class OpenAIAdapter implements LLMAdapter {
-  private apiKey: string;
-  private usageLogs: LLMUsageLog[] = [];
-  private modelFactory?: (options?: LLMOptions) => BaseChatModel;
+  private readonly client: OpenAIClientLike;
 
   constructor(apiKey: string, options?: OpenAIAdapterOptions) {
-    this.apiKey = apiKey;
-    this.modelFactory = options?.modelFactory;
-  }
-
-  private getModel(options?: LLMOptions, defaultTemp = 0.3): BaseChatModel {
-    if (this.modelFactory) {
-      return this.modelFactory(options);
-    }
-
-    return new ChatOpenAI({
-      apiKey: this.apiKey,
-      modelName: options?.model ?? DEFAULT_MODEL,
-      temperature: options?.temperature ?? defaultTemp,
-      maxTokens: options?.maxTokens,
-      maxRetries: 2,
-    });
-  }
-
-  private buildMessages(prompt: string, options?: LLMOptions): BaseMessage[] {
-    const messages: BaseMessage[] = [];
-    if (options?.systemPrompt) {
-      messages.push(new SystemMessage(options.systemPrompt));
-    }
-    messages.push(new HumanMessage(prompt));
-    return messages;
-  }
-
-  private estimateTokens(messages: BaseMessage[]): number {
-    let charCount = 0;
-    for (const msg of messages) {
-      charCount += typeof msg.content === "string" ? msg.content.length : 100;
-    }
-    return Math.max(10, Math.ceil(charCount / 4));
-  }
-
-  async complete(prompt: string, options?: LLMOptions): Promise<string> {
-    const model = this.getModel(options, 0.3);
-    const messages = this.buildMessages(prompt, options);
-
-    options?.context?.budget?.claimModelCall(this.estimateTokens(messages));
-
-    const response = await model.invoke(messages, {
-      signal: options?.context?.signal,
-      callbacks: options?.context?.callbacks as Callbacks,
-    });
-
-    const modelName = options?.model ?? DEFAULT_MODEL;
-    this.logUsage(response, modelName, options);
-
-    return typeof response.content === "string"
-      ? response.content
-      : JSON.stringify(response.content);
+    this.client = options?.client ?? (new OpenAI({ apiKey }) as unknown as OpenAIClientLike);
   }
 
   async completeStructured<T>(
     prompt: string,
     schema: z.ZodSchema<T>,
-    options?: LLMOptions
+    options?: LLMOptions,
   ): Promise<T> {
-    const model = this.getModel(options, 0.2);
-    const messages = this.buildMessages(prompt, options);
+    const input = [
+      ...(options?.systemPrompt
+        ? [{ role: "system" as const, content: options.systemPrompt }]
+        : []),
+      { role: "user" as const, content: prompt },
+    ];
+    const model = options?.model ?? DEFAULT_MODEL;
 
-    options?.context?.budget?.claimModelCall(this.estimateTokens(messages));
+    options?.context?.budget?.claimModelCall(estimateTokens(input));
 
-    const structuredModel = model.withStructuredOutput(schema, {
-      includeRaw: true,
-    });
-    const result = (await structuredModel.invoke(messages, {
-      signal: options?.context?.signal,
-      callbacks: options?.context?.callbacks as Callbacks,
-    })) as { raw: BaseMessage; parsed: T | null };
+    const response = await this.client.responses.parse(
+      {
+        model,
+        input,
+        temperature: options?.temperature,
+        max_output_tokens: options?.maxTokens,
+        text: {
+          format: zodTextFormat(
+            schema,
+            options?.schemaName ?? "structured_output",
+          ),
+        },
+      },
+      { signal: options?.context?.signal },
+    );
 
-    const modelName = options?.model ?? DEFAULT_MODEL;
-    this.logUsage(result.raw, modelName, options);
-    if (result.parsed === null) {
+    if (response.usage) {
+      const usage: LLMUsageLog = {
+        model,
+        promptTokens: response.usage.input_tokens,
+        completionTokens: response.usage.output_tokens,
+        totalTokens: response.usage.total_tokens,
+        timestamp: new Date(),
+      };
+      options?.context?.budget?.recordModelUsage(usage);
+    }
+
+    if (response.output_parsed === null) {
       throw new Error("Structured output parsing failed");
     }
 
-    return result.parsed;
+    return response.output_parsed as T;
   }
+}
 
-  async *stream(
-    prompt: string,
-    options?: LLMOptions
-  ): AsyncGenerator<string, void, unknown> {
-    const model = this.getModel(options, 0.3);
-    const messages = this.buildMessages(prompt, options);
-
-    options?.context?.budget?.claimModelCall(this.estimateTokens(messages));
-
-    const stream = await model.stream(messages, {
-      signal: options?.context?.signal,
-      callbacks: options?.context?.callbacks as Callbacks,
-    });
-
-    for await (const chunk of stream) {
-      if (chunk.content) {
-        yield typeof chunk.content === "string"
-          ? chunk.content
-          : JSON.stringify(chunk.content);
-      }
-    }
-  }
-
-  getUsageLogs(): LLMUsageLog[] {
-    return [...this.usageLogs];
-  }
-
-  private logUsage(
-    response: unknown,
-    model: string,
-    options?: LLMOptions
-  ): void {
-    if (
-      response &&
-      typeof response === "object" &&
-      "usage_metadata" in response &&
-      response.usage_metadata
-    ) {
-      const usage = (response as AIMessage).usage_metadata;
-      if (usage) {
-        const log: LLMUsageLog = {
-          model,
-          promptTokens: usage.input_tokens,
-          completionTokens: usage.output_tokens,
-          totalTokens: usage.total_tokens,
-          timestamp: new Date(),
-        };
-        this.usageLogs.push(log);
-        options?.context?.budget?.recordModelUsage(log);
-        console.log(
-          `[LLM] ${model}: ${log.promptTokens}+${log.completionTokens}=${log.totalTokens} tokens`
-        );
-      }
-    }
-  }
+function estimateTokens(
+  input: ReadonlyArray<{ content: string }>,
+): number {
+  const characterCount = input.reduce(
+    (total, message) => total + message.content.length,
+    0,
+  );
+  return Math.max(10, Math.ceil(characterCount / 4));
 }

@@ -33,7 +33,6 @@ vi.mock("@/modules/workflow", () => ({
   }),
 }));
 vi.mock("@/observability/langfuse", () => ({
-  createLangfuseCallback: () => null,
   emitResearchScores: observabilityMocks.emitResearchScores,
   flushLangfuse: observabilityMocks.flushLangfuse,
   traceResearch: async (
