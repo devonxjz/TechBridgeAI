@@ -383,6 +383,17 @@ export const ClaimEvidenceSchema = z.object({
   status: VerificationStatusSchema,
 });
 
+export const LLMClaimEvidenceSchema = z.object({
+  supportingUrls: z
+    .array(z.string().url())
+    .default([])
+    .describe("URLs of sources that corroborate this information"),
+  conflictingUrls: z
+    .array(z.string().url())
+    .default([])
+    .describe("URLs of sources that contradict this information"),
+});
+
 export const PreviewModeSchema = z.enum(["short_excerpt", "metadata_only"]);
 export const RobotsDecisionSchema = z.enum(["allowed", "disallowed", "unknown"]);
 export const FetchMethodSchema = z.enum(["search_snippet", "server_extract"]);
@@ -657,4 +668,3 @@ export interface PreparedEvidence {
   sourceCoverage: number;
   outcome: Exclude<ResearchOutcome, "running">;
 }
-

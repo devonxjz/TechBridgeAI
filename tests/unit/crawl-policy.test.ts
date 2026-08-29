@@ -53,7 +53,7 @@ describe("Crawl Policy & Robots Parser", () => {
   });
 
   it("enforces per-domain interval throttling without blocking distinct domains", async () => {
-    let currentTime = 1000;
+    const currentTime = 1000;
     const now = () => currentTime;
     const loadRobots = vi.fn().mockResolvedValue("User-agent: *\nAllow: /");
 
@@ -96,7 +96,7 @@ describe("Crawl Policy & Robots Parser", () => {
   });
 
   it("rejects immediately when aborted during throttle wait and cleans up", async () => {
-    let currentTime = 1000;
+    const currentTime = 1000;
     const now = () => currentTime;
     const loadRobots = vi.fn().mockResolvedValue("User-agent: *\nAllow: /");
 

@@ -17,6 +17,7 @@ import type {
   RawFinding,
   FieldChange,
 } from "@/lib/types";
+import { LLMClaimEvidenceSchema } from "@/lib/types";
 import type { LLMAdapter, LLMInvocationContext } from "@/adapters/llm/types";
 import { toSourceCitations, buildClaimEvidence } from "@/modules/research/evidence";
 
@@ -37,11 +38,6 @@ export interface ProfileModule {
 interface ProfileDeps {
   llm: LLMAdapter;
 }
-
-const LLMClaimEvidenceSchema = z.object({
-  supportingUrls: z.array(z.string()).default([]),
-  conflictingUrls: z.array(z.string()).default([]),
-});
 
 // Zod schema for LLM structured output (OpenAI Structured Outputs requires .nullable() instead of .optional())
 const LLMProfileSchema = z.object({

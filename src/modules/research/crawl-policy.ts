@@ -5,6 +5,7 @@
 
 import robotsParser from "robots-parser";
 import type { RobotsDecision } from "@/lib/types";
+import { ScrapeError } from "@/adapters/scraper/types";
 
 export interface CrawlDecision {
   robotsDecision: RobotsDecision;
@@ -30,7 +31,7 @@ interface RobotsCacheEntry {
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
-    return Promise.reject(new Error("Execution aborted"));
+    return Promise.reject(new DOMException("Execution aborted", "AbortError"));
   }
   if (ms <= 0) return Promise.resolve();
 
@@ -39,7 +40,7 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 
     const onAbort = () => {
       if (timer) clearTimeout(timer);
-      reject(new Error("Execution aborted"));
+      reject(new DOMException("Execution aborted", "AbortError"));
     };
 
     timer = setTimeout(() => {
@@ -62,7 +63,7 @@ export function createCrawlPolicy(
   return {
     async beforeFetch(url: string, signal?: AbortSignal): Promise<CrawlDecision> {
       if (signal?.aborted) {
-        throw new Error("Execution aborted");
+        throw new DOMException("Execution aborted", "AbortError");
       }
 
       let targetUrl: URL;
@@ -88,8 +89,12 @@ export function createCrawlPolicy(
             status: "success",
           };
         } catch (err) {
+          const isNotFound = err instanceof ScrapeError && (err.code === "not_found" || err.code === "empty");
+          // Fallback string matching for older scrapers or fetch errors
           const errMsg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-          if (errMsg.includes("404") || errMsg.includes("empty text") || errMsg.includes("not found")) {
+          const looksLikeNotFound = errMsg.includes("404") || errMsg.includes("empty text") || errMsg.includes("not found");
+
+          if (isNotFound || looksLikeNotFound) {
             cacheEntry = {
               robotsText: "",
               loadedAt: now(),

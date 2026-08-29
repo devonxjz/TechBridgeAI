@@ -83,11 +83,9 @@ describe("Adapters Unit Tests", () => {
       const originalFetch = globalThis.fetch;
       try {
         let calledUrl = "";
-        let calledBody: any = null;
 
-        globalThis.fetch = vi.fn().mockImplementation(async (url: string, init: any) => {
-          calledUrl = url;
-          calledBody = JSON.parse(init.body);
+        globalThis.fetch = vi.fn().mockImplementation(async (url: string | URL | Request) => {
+          calledUrl = String(url);
           return {
             ok: true,
             json: async () => ({

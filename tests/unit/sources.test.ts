@@ -42,6 +42,10 @@ describe("Research Sources Unit Tests", () => {
       expect(findings.length).toBeGreaterThan(0);
       expect(findings[0].source).toBe("web_search");
       expect(findings[0].confidence).toBe(0.6);
+      expect(findings[0].metadata).toMatchObject({
+        queryIndex: 0,
+        providerRank: 1,
+      });
       expect(search.callLog.some((c) => c.query.includes("mã số thuế"))).toBe(true);
       expect(search.callLog.some((c) => c.query.includes("AI"))).toBe(true);
     });
@@ -164,6 +168,22 @@ describe("Research Sources Unit Tests", () => {
       expect(findings.every((f) => !f.url.includes("vingroup.net"))).toBe(true);
       expect(findings[0].source).toBe("news");
       expect(search.callLog.some((c) => c.options?.vertical === "news")).toBe(true);
+    });
+
+    it("preserves the original provider rank for each news query", async () => {
+      search.setResults('"FPT" tin tức hoạt động mới nhất', [
+        { title: "Lower ranked", url: "https://news.example/lower", snippet: "lower" },
+        { title: "Top ranked", url: "https://news.example/top", snippet: "top" },
+      ]);
+
+      const findings = await searchNews({ name: "FPT" }, search, undefined, undefined, [
+        '"FPT" tin tức hoạt động mới nhất',
+      ]);
+
+      expect(findings.map((item) => item.metadata)).toEqual([
+        expect.objectContaining({ queryIndex: 0, providerRank: 1 }),
+        expect.objectContaining({ queryIndex: 0, providerRank: 2 }),
+      ]);
     });
 
     it("extracts publication via scraper when available, producing server_extract", async () => {

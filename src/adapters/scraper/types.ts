@@ -10,6 +10,7 @@ export type ScrapeErrorCode =
   | "invalid_target"
   | "too_large"
   | "empty"
+  | "not_found"
   | "rate_limited"
   | "upstream_error";
 

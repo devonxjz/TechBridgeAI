@@ -16,6 +16,8 @@ import type {
   VerificationStatus,
 } from "@/lib/types";
 
+import { canonicalizeUrl, getHostname } from "./url-utils";
+
 const SOURCE_ORDER: Record<SourceName, number> = {
   registry: 0,
   website: 1,
@@ -24,25 +26,12 @@ const SOURCE_ORDER: Record<SourceName, number> = {
   linkedin: 4,
 };
 
-function canonicalizeUrl(rawUrl: string): string | null {
-  try {
-    const parsed = new URL(rawUrl);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return null;
-    }
-    parsed.hash = "";
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-}
+const RRF_K = 60;
 
-function getHostname(rawUrl: string): string {
-  try {
-    return new URL(rawUrl).hostname.toLowerCase();
-  } catch {
-    return "unknown";
-  }
+interface RankedFinding {
+  finding: RawFinding;
+  fusionScore: number;
+  queryIndexes: Set<number>;
 }
 
 export function prepareEvidence(
@@ -71,32 +60,63 @@ export function prepareEvidence(
     }
   }
 
-  // Deduplicate by canonical URL, keeping higher confidence or richer content
-  const dedupedMap = new Map<string, RawFinding>();
+  // Deduplicate by canonical URL while retaining cross-query relevance.
+  const dedupedMap = new Map<string, RankedFinding>();
   for (const f of candidateFindings) {
+    const contribution = reciprocalRankContribution(f);
     const existing = dedupedMap.get(f.url);
     if (!existing) {
-      dedupedMap.set(f.url, f);
-    } else {
-      if (f.confidence > existing.confidence) {
-        dedupedMap.set(f.url, f);
-      } else if (
-        f.confidence === existing.confidence &&
-        (SOURCE_ORDER[f.source] < SOURCE_ORDER[existing.source] ||
-          (f.fetchMethod === "server_extract" && existing.fetchMethod !== "server_extract") ||
-          f.content.length > existing.content.length)
-      ) {
-        dedupedMap.set(f.url, f);
+      dedupedMap.set(f.url, {
+        finding: f,
+        fusionScore: contribution.score,
+        queryIndexes: contribution.queryIndex === null
+          ? new Set()
+          : new Set([contribution.queryIndex]),
+      });
+      continue;
+    }
+
+    if (isRicherFinding(f, existing.finding)) {
+      existing.finding = f;
+    }
+    if (
+      contribution.queryIndex === null ||
+      !existing.queryIndexes.has(contribution.queryIndex)
+    ) {
+      existing.fusionScore += contribution.score;
+      if (contribution.queryIndex !== null) {
+        existing.queryIndexes.add(contribution.queryIndex);
       }
     }
   }
 
-  // Deterministically sort by source order, then canonical URL
-  const sortedFindings = Array.from(dedupedMap.values()).sort((a, b) => {
-    const orderDiff = SOURCE_ORDER[a.source] - SOURCE_ORDER[b.source];
-    if (orderDiff !== 0) return orderDiff;
-    return a.url.localeCompare(b.url);
-  });
+  // Keep source precedence, then rank search evidence by fused relevance.
+  const sortedFindings = Array.from(dedupedMap.values())
+    .sort((a, b) => {
+      const sourceOrderDiff = SOURCE_ORDER[a.finding.source] - SOURCE_ORDER[b.finding.source];
+      if (sourceOrderDiff !== 0) return sourceOrderDiff;
+
+      if (isSearchFinding(a.finding) && isSearchFinding(b.finding)) {
+        const fusionDiff = b.fusionScore - a.fusionScore;
+        if (fusionDiff !== 0) return fusionDiff;
+      }
+
+      const extractionDiff = Number(b.finding.fetchMethod === "server_extract") -
+        Number(a.finding.fetchMethod === "server_extract");
+      if (extractionDiff !== 0) return extractionDiff;
+
+      const metadataDiff = metadataCompleteness(b.finding) - metadataCompleteness(a.finding);
+      if (metadataDiff !== 0) return metadataDiff;
+
+      const confidenceDiff = b.finding.confidence - a.finding.confidence;
+      if (confidenceDiff !== 0) return confidenceDiff;
+
+      const publishedDiff = publishedAtValue(b.finding) - publishedAtValue(a.finding);
+      if (publishedDiff !== 0) return publishedDiff;
+
+      return a.finding.url.localeCompare(b.finding.url);
+    })
+    .map(({ finding }) => finding);
 
   let outcome: Exclude<ResearchOutcome, "running">;
   if (sortedFindings.length === 0 || succeededResults.length === 0) {
@@ -112,6 +132,62 @@ export function prepareEvidence(
     sourceCoverage,
     outcome,
   };
+}
+
+function isSearchFinding(finding: RawFinding): boolean {
+  return finding.source === "news" || finding.source === "web_search";
+}
+
+function reciprocalRankContribution(
+  finding: RawFinding,
+): { score: number; queryIndex: number | null } {
+  if (!isSearchFinding(finding)) return { score: 0, queryIndex: null };
+
+  const rank = finding.metadata?.providerRank;
+  const queryIndex = finding.metadata?.queryIndex;
+  const normalizedQueryIndex =
+    typeof queryIndex === "number" && Number.isInteger(queryIndex) && queryIndex >= 0
+      ? queryIndex
+      : null;
+
+  return {
+    score:
+      typeof rank === "number" && Number.isInteger(rank) && rank > 0
+        ? 1 / (RRF_K + rank)
+        : 0,
+    queryIndex: normalizedQueryIndex,
+  };
+}
+
+function isRicherFinding(candidate: RawFinding, current: RawFinding): boolean {
+  if (candidate.confidence !== current.confidence) {
+    return candidate.confidence > current.confidence;
+  }
+
+  if (candidate.fetchMethod !== current.fetchMethod) {
+    return candidate.fetchMethod === "server_extract";
+  }
+
+  if (candidate.content.length !== current.content.length) {
+    return candidate.content.length > current.content.length;
+  }
+
+  return SOURCE_ORDER[candidate.source] < SOURCE_ORDER[current.source];
+}
+
+function metadataCompleteness(finding: RawFinding): number {
+  const publication = finding.publication;
+  return Number(Boolean(publication?.publisherName)) +
+    Number(Boolean(publication?.authors?.length)) +
+    Number(Boolean(publication?.publishedAt)) +
+    Number(Boolean(finding.excerpt));
+}
+
+function publishedAtValue(finding: RawFinding): number {
+  const value = finding.publication?.publishedAt;
+  if (!value) return 0;
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? 0 : timestamp;
 }
 
 export function toSourceCitations(
@@ -275,4 +351,3 @@ export function buildClaimEvidence(
     conflictingUrls,
   };
 }
-

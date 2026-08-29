@@ -114,7 +114,6 @@ describe("Sprint 0 Provenance and Claim Verification Schemas", () => {
     const {
       SourceCitationSchema,
       ClaimEvidenceSchema,
-      CompanyProfileSchema,
     } = await import("@/lib/types");
 
     const citation = {
@@ -322,4 +321,3 @@ describe("ResearchRequestSchema and ResearchSnapshotSchema", () => {
     ).toThrow();
   });
 });
-

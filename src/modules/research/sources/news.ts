@@ -4,14 +4,8 @@ import type { ScraperAdapter } from "@/adapters/scraper/types";
 import { buildResearchQueries, applyDomainPolicy } from "../queries";
 import { normalizePublication } from "../publication";
 
-export interface CrawlDecisionLike {
-  robotsDecision: "allowed" | "disallowed" | "unknown";
-  shouldExtract: boolean;
-}
-
-export interface CrawlPolicyLike {
-  beforeFetch(url: string, signal?: AbortSignal): Promise<CrawlDecisionLike>;
-}
+import type { CrawlPolicy } from "../crawl-policy";
+import { getHostname } from "../url-utils";
 
 /**
  * Search for recent news about the company and normalize publication provenance.
@@ -20,7 +14,7 @@ export async function searchNews(
   input: CompanyInput,
   searchAdapter: SearchAdapter,
   scraperAdapter?: ScraperAdapter,
-  crawlPolicy?: CrawlPolicyLike,
+  crawlPolicy?: CrawlPolicy,
   customQueries?: string[]
 ): Promise<RawFinding[]> {
   const queries = customQueries ?? buildResearchQueries(input).news;
@@ -28,15 +22,11 @@ export async function searchNews(
 
   let companyHostname: string | undefined;
   if (input.website) {
-    try {
-      companyHostname = new URL(input.website).hostname.toLowerCase();
-    } catch {
-      // Ignore malformed website input
-    }
+    companyHostname = getHostname(input.website);
   }
 
   const resultsByQuery = await Promise.all(
-    queries.map(async (query) => {
+    queries.map(async (query, queryIndex) => {
       const rawResults = await searchAdapter.search(query, {
         maxResults: 10,
         language: "vi",
@@ -47,17 +37,15 @@ export async function searchNews(
       // Filter out company's own website
       const filteredResults = rawResults.filter((result) => {
         if (!companyHostname) return true;
-        try {
-          const resHost = new URL(result.url).hostname.toLowerCase();
-          return resHost !== companyHostname && !resHost.endsWith(`.${companyHostname}`);
-        } catch {
-          return true;
-        }
+        const resHost = getHostname(result.url);
+        return resHost !== companyHostname && !resHost.endsWith(`.${companyHostname}`);
       });
 
       // Apply domain policy
       const selectedResults = applyDomainPolicy(filteredResults, input.sourcePolicy, 5);
-
+      const providerRankByUrl = new Map(
+        rawResults.map((result, index) => [result.url, index + 1]),
+      );
       const group: RawFinding[] = [];
       for (const result of selectedResults) {
         let scraped = null;
@@ -89,26 +77,36 @@ export async function searchNews(
         const title = norm.publication.title || result.title;
         const body = norm.excerpt || result.snippet;
 
+        const signals = {
+          primarySource: false,
+          publisherIdentified: !!norm.publication.publisherName,
+          authorIdentified: norm.publication.authors.length > 0,
+          publicationDateIdentified: !!norm.publication.publishedAt,
+          duplicateClusterSize: 1,
+        };
+
+        let confidence = 0.65;
+        if (signals.publisherIdentified) confidence += 0.1;
+        if (signals.authorIdentified) confidence += 0.05;
+        if (signals.publicationDateIdentified) confidence += 0.05;
+        if (norm.fetchMethod === "server_extract") confidence += 0.05;
+
         group.push({
           source: "news",
           url: norm.publication.canonicalUrl || result.url,
           content: `[${title}]\n${body}`,
           extractedAt: new Date(),
-          confidence: 0.65,
+          confidence: Math.min(confidence, 1.0),
           metadata: {
             title,
             query,
+            queryIndex,
+            providerRank: providerRankByUrl.get(result.url),
             publisherName: norm.publication.publisherName,
           },
           publication: norm.publication,
           previewPolicy: norm.previewPolicy,
-          signals: {
-            primarySource: false,
-            publisherIdentified: !!norm.publication.publisherName,
-            authorIdentified: norm.publication.authors.length > 0,
-            publicationDateIdentified: !!norm.publication.publishedAt,
-            duplicateClusterSize: 1,
-          },
+          signals,
           excerpt: norm.excerpt,
           contentFingerprint: norm.contentFingerprint,
           fetchMethod: norm.fetchMethod,
@@ -124,6 +122,3 @@ export async function searchNews(
 
   return findings;
 }
-
-
-

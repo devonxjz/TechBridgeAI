@@ -24,34 +24,7 @@ export interface NormalizedPublication {
   fetchMethod: FetchMethod;
 }
 
-function getHostname(rawUrl: string): string {
-  try {
-    return new URL(rawUrl).hostname.toLowerCase();
-  } catch {
-    return "unknown";
-  }
-}
-
-function isValidHttpUrl(rawUrl: string): boolean {
-  try {
-    const parsed = new URL(rawUrl);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-function resolveHttpUrl(target: string, base: string): string | undefined {
-  try {
-    const resolved = new URL(target, base).toString();
-    if (isValidHttpUrl(resolved)) {
-      return resolved;
-    }
-  } catch {
-    // Ignore invalid URL
-  }
-  return undefined;
-}
+import { getHostname, resolveHttpUrl } from "./url-utils";
 
 function parseIsoDate(val: unknown): string | undefined {
   if (typeof val !== "string" || !val.trim()) return undefined;
@@ -156,12 +129,26 @@ export function normalizePublication(
       try {
         const text = $(el).text();
         if (!text.trim()) return;
-        const json = JSON.parse(text);
-        const items = Array.isArray(json) ? json : [json];
+        const json: unknown = JSON.parse(text);
+        let items: Record<string, unknown>[] = [];
+        if (Array.isArray(json)) {
+          items = json.filter(
+            (item): item is Record<string, unknown> =>
+              Boolean(item) && typeof item === "object",
+          );
+        } else if (json && typeof json === "object") {
+          const record = json as Record<string, unknown>;
+          if (Array.isArray(record["@graph"])) {
+            items = record["@graph"].filter(
+              (item): item is Record<string, unknown> =>
+                Boolean(item) && typeof item === "object",
+            );
+          } else {
+            items = [record];
+          }
+        }
 
         for (const item of items) {
-          if (!item || typeof item !== "object") continue;
-
           // Check paywall
           if (item.isAccessibleForFree === false || item.isAccessibleForFree === "False" || item.isAccessibleForFree === "false") {
             paywallDetected = true;
@@ -221,7 +208,7 @@ export function normalizePublication(
     // 4. Safe plain text body extraction
     $("script, style, noscript, [data-nosnippet]").remove();
 
-    const mainContainer = $("article").length > 0 ? $("article") : $("main").length > 0 ? $("main") : $("body");
+    const mainContainer = $("article").length > 0 ? $("article") : $("[role='main']").length > 0 ? $("[role='main']") : $("#content").length > 0 ? $("#content") : $("main").length > 0 ? $("main") : $("body");
     extractedRawText = mainContainer.text().replace(/\s+/g, " ").trim();
     if (extractedRawText.length > 0) {
       fetchMethod = "server_extract";
@@ -249,10 +236,11 @@ export function normalizePublication(
   }
 
   let contentFingerprint: string | undefined = undefined;
-  if (excerpt) {
+  const hashText = extractedRawText || excerpt;
+  if (hashText) {
     contentFingerprint = crypto
       .createHash("sha256")
-      .update(excerpt.toLowerCase())
+      .update(hashText.toLowerCase())
       .digest("hex");
   }
 

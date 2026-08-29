@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { SourceCitation } from "@/lib/types";
 
 interface SourcePreviewDialogProps {
@@ -9,24 +9,58 @@ interface SourcePreviewDialogProps {
   onClose: () => void;
 }
 
+const FIELD_LABELS: Record<string, string> = {
+  officialName: "Tên chính thức",
+  tradingNames: "Tên giao dịch",
+  taxId: "Mã số thuế",
+  industry: "Ngành nghề",
+  description: "Mô tả",
+  foundedYear: "Năm thành lập",
+  headquarters: "Trụ sở",
+  website: "Website",
+  keyPeople: "Nhân sự chủ chốt",
+  products: "Sản phẩm/Dịch vụ",
+  markets: "Thị trường",
+  companySize: "Quy mô",
+  revenue: "Doanh thu",
+  recentActivities: "Hoạt động gần đây",
+};
+
 export function SourcePreviewDialog({
   citation,
   isOpen,
   onClose,
 }: SourcePreviewDialogProps) {
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-      }
-    };
-    if (isOpen) {
-      window.addEventListener("keydown", handleKeyDown);
-    }
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  const dialogRef = useRef<HTMLDialogElement>(null);
 
-  if (!isOpen || !citation) return null;
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    if (isOpen && !dialog.open) {
+      dialog.showModal();
+    } else if (!isOpen && dialog.open) {
+      dialog.close();
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const handleClose = () => onClose();
+    dialog.addEventListener("close", handleClose);
+    return () => dialog.removeEventListener("close", handleClose);
+  }, [onClose]);
+
+  // Handle backdrop click to close
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDialogElement>) => {
+    if (e.target === dialogRef.current) {
+      onClose();
+    }
+  };
+
+  if (!citation || !isOpen) return null;
 
   const publisher =
     citation.publication?.publisherName ||
@@ -49,15 +83,13 @@ export function SourcePreviewDialog({
       : "Đoạn trích tìm kiếm";
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="source-preview-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"
-      onClick={onClose}
+    <dialog
+      ref={dialogRef}
+      className="p-0 bg-transparent backdrop:bg-black/60 backdrop:backdrop-blur-sm animate-fade-in w-full max-w-2xl max-h-[85vh] m-auto rounded-xl shadow-2xl"
+      onClick={handleBackdropClick}
     >
       <div
-        className="glass-card w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden shadow-2xl border border-card-border bg-[#0f172a]/95 text-foreground animate-scale-up"
+        className="glass-card w-full h-full flex flex-col overflow-hidden border border-card-border bg-[#0f172a]/95 text-foreground animate-scale-up"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -95,13 +127,14 @@ export function SourcePreviewDialog({
               )}
             </p>
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Đóng"
-            className="p-1.5 text-muted hover:text-foreground rounded-lg hover:bg-surface border border-transparent hover:border-card-border transition-colors text-sm"
-          >
-            ✕
-          </button>
+          <form method="dialog">
+            <button
+              aria-label="Đóng"
+              className="p-1.5 text-muted hover:text-foreground rounded-lg hover:bg-surface border border-transparent hover:border-card-border transition-colors text-sm"
+            >
+              ✕
+            </button>
+          </form>
         </div>
 
         {/* Policy Notices */}
@@ -147,7 +180,7 @@ export function SourcePreviewDialog({
                     key={field}
                     className="px-2.5 py-1 text-xs rounded-md bg-accent/10 text-accent-light border border-accent/20"
                   >
-                    {field}
+                    {FIELD_LABELS[field as string] || field}
                   </span>
                 ))}
               </div>
@@ -172,6 +205,6 @@ export function SourcePreviewDialog({
           </div>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }

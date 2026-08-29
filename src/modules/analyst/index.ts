@@ -14,6 +14,7 @@ import type {
   SuggestedAction,
   FitScoreCriteria,
 } from "@/lib/types";
+import { LLMClaimEvidenceSchema } from "@/lib/types";
 import type { LLMAdapter, LLMInvocationContext } from "@/adapters/llm/types";
 import { buildClaimEvidence } from "@/modules/research/evidence";
 
@@ -37,11 +38,6 @@ export const DEFAULT_CRITERIA_WEIGHTS: Record<string, number> = {
   "Digital Maturity": 0.15,
   "Recent Activity": 0.2,
 };
-
-const LLMClaimEvidenceSchema = z.object({
-  supportingUrls: z.array(z.string()).default([]),
-  conflictingUrls: z.array(z.string()).default([]),
-});
 
 const LLMAnalysisSchema = z.object({
   executiveSummary: z.string(),

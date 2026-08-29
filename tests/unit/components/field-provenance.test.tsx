@@ -1,9 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import React from "react";
 import { renderToString } from "react-dom/server";
 import { EvidenceBadge } from "@/app/components/evidence-badge";
 import { ProfileCard } from "@/app/components/profile-card";
-import type { CompanyProfile, AnalysisReport } from "@/lib/types";
+import type { CompanyProfile } from "@/lib/types";
 
 describe("EvidenceBadge & Field Provenance UI", () => {
   it("renders appropriate status labels and styles across verification states", () => {

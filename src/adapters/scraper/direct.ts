@@ -311,6 +311,13 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
           return;
         }
 
+        if (statusCode === 404) {
+          settleOnce(() => {
+            reject(new ScrapeError("Direct fetch not found", "direct", "not_found"));
+          });
+          return;
+        }
+
         if (statusCode < 200 || statusCode >= 400) {
           settleOnce(() => {
             reject(

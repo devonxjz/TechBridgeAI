@@ -80,6 +80,76 @@ describe("prepareEvidence", () => {
     expect(res1.findings.map((item) => item.url)).toEqual(res2.findings.map((item) => item.url));
   });
 
+  it("ranks a result found by multiple queries above a one-off result", () => {
+    const repeatedFirst = finding(
+      "https://publisher.example/repeated",
+      0.6,
+      "Repeated result",
+      "web_search",
+    );
+    repeatedFirst.metadata = { queryIndex: 0, providerRank: 5 };
+
+    const repeatedSecond = finding(
+      "https://publisher.example/repeated",
+      0.6,
+      "Repeated result",
+      "web_search",
+    );
+    repeatedSecond.metadata = { queryIndex: 1, providerRank: 1 };
+
+    const oneOff = finding(
+      "https://publisher.example/one-off",
+      0.6,
+      "One-off result",
+      "web_search",
+    );
+    oneOff.metadata = { queryIndex: 0, providerRank: 1 };
+
+    const prepared = prepareEvidence([
+      succeeded("web_search", oneOff, repeatedFirst, repeatedSecond),
+    ]);
+
+    expect(prepared.findings.map((item) => item.url)).toEqual([
+      "https://publisher.example/repeated",
+      "https://publisher.example/one-off",
+    ]);
+  });
+
+  it("counts one provider URL at most once per query during fusion", () => {
+    const duplicateFirst = finding(
+      "https://publisher.example/duplicate",
+      0.6,
+      "Duplicate result",
+      "web_search",
+    );
+    duplicateFirst.metadata = { queryIndex: 0, providerRank: 2 };
+
+    const duplicateSecond = finding(
+      "https://publisher.example/duplicate",
+      0.6,
+      "Duplicate result",
+      "web_search",
+    );
+    duplicateSecond.metadata = { queryIndex: 0, providerRank: 3 };
+
+    const oneOff = finding(
+      "https://publisher.example/one-off",
+      0.6,
+      "One-off result",
+      "web_search",
+    );
+    oneOff.metadata = { queryIndex: 0, providerRank: 1 };
+
+    const prepared = prepareEvidence([
+      succeeded("web_search", duplicateFirst, duplicateSecond, oneOff),
+    ]);
+
+    expect(prepared.findings.map((item) => item.url)).toEqual([
+      "https://publisher.example/one-off",
+      "https://publisher.example/duplicate",
+    ]);
+  });
+
   it("computes complete, partial, and failed outcomes", () => {
     const s1 = succeeded("website", finding("https://example.com", 0.9, "content", "website"));
     const s2 = succeeded("news", finding("https://news.com", 0.8, "news", "news"));
@@ -271,4 +341,3 @@ describe("Sprint 3 Evidence Normalization & Claim Validation", () => {
     expect(conflictClaim.status).toBe("conflicting");
   });
 });
-

@@ -8,6 +8,42 @@ interface EvidenceBadgeProps {
   className?: string;
 }
 
+const getStatusBadge = (status: ClaimEvidence["status"]) => {
+  switch (status) {
+    case "primary_source":
+      return {
+        label: "Nguồn chính thức",
+        icon: "🛡️",
+        style: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25",
+      };
+    case "corroborated":
+      return {
+        label: `Kiểm chứng chéo`, // We'll handle the count in the component
+        icon: "✓✓",
+        style: "bg-blue-500/15 text-blue-300 border-blue-500/30 hover:bg-blue-500/25",
+      };
+    case "single_source":
+      return {
+        label: "Nguồn đơn",
+        icon: "ℹ️",
+        style: "bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25",
+      };
+    case "conflicting":
+      return {
+        label: "Có mâu thuẫn",
+        icon: "⚠️",
+        style: "bg-rose-500/15 text-rose-300 border-rose-500/30 hover:bg-rose-500/25",
+      };
+    case "insufficient":
+    default:
+      return {
+        label: "Chưa đủ nguồn",
+        icon: "⚪",
+        style: "bg-slate-500/15 text-slate-300 border-slate-500/30 hover:bg-slate-500/25",
+      };
+  }
+};
+
 export function EvidenceBadge({
   evidence,
   onClick,
@@ -15,43 +51,11 @@ export function EvidenceBadge({
 }: EvidenceBadgeProps) {
   if (!evidence) return null;
 
-  const getStatusBadge = () => {
-    switch (evidence.status) {
-      case "primary_source":
-        return {
-          label: "Nguồn chính thức",
-          icon: "🛡️",
-          style: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25",
-        };
-      case "corroborated":
-        return {
-          label: `Kiểm chứng chéo (${evidence.independentPublisherCount} nguồn)`,
-          icon: "✓✓",
-          style: "bg-blue-500/15 text-blue-300 border-blue-500/30 hover:bg-blue-500/25",
-        };
-      case "single_source":
-        return {
-          label: "Nguồn đơn",
-          icon: "ℹ️",
-          style: "bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25",
-        };
-      case "conflicting":
-        return {
-          label: "Có mâu thuẫn",
-          icon: "⚠️",
-          style: "bg-rose-500/15 text-rose-300 border-rose-500/30 hover:bg-rose-500/25",
-        };
-      case "insufficient":
-      default:
-        return {
-          label: "Chưa đủ nguồn",
-          icon: "⚪",
-          style: "bg-slate-500/15 text-slate-300 border-slate-500/30 hover:bg-slate-500/25",
-        };
-    }
+  const badgeBase = getStatusBadge(evidence.status);
+  const badge = {
+    ...badgeBase,
+    label: evidence.status === "corroborated" ? `Kiểm chứng chéo (${evidence.independentPublisherCount} nguồn)` : badgeBase.label,
   };
-
-  const badge = getStatusBadge();
 
   if (onClick) {
     return (

@@ -91,8 +91,8 @@ describe("Profile Diff Engine Unit Tests", () => {
   });
 
   it("builds profile with rich source citations and field evidence mapping", async () => {
-    const customLLM: any = {
-      completeStructured: async () => ({
+    const customLLM = new MockLLMAdapter();
+    customLLM.setResponse("", JSON.stringify({
         officialName: "CÔNG TY CỔ PHẦN FPT",
         tradingNames: ["FPT Corporation"],
         taxId: "0101248141",
@@ -120,11 +120,10 @@ describe("Profile Diff Engine Unit Tests", () => {
             conflictingUrls: [],
           },
         },
-      }),
-    };
+      }));
 
-    const module = createProfileModule({ llm: customLLM });
-    const profile = await module.buildProfile(
+    const profileModuleUnderTest = createProfileModule({ llm: customLLM });
+    const profile = await profileModuleUnderTest.buildProfile(
       [
         {
           source: "registry",
@@ -144,4 +143,3 @@ describe("Profile Diff Engine Unit Tests", () => {
     expect(profile.fieldEvidence?.officialName?.status).toBe("primary_source");
   });
 });
-

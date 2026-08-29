@@ -182,4 +182,45 @@ describe("Publication Metadata Normalizer", () => {
     expect(norm.excerpt).toBe(baseSearchResult.snippet);
     expect(norm.contentFingerprint).toBeDefined();
   });
+
+  it("extracts metadata from @graph JSON-LD arrays", () => {
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@graph": [
+              {
+                "@type": "WebSite",
+                "name": "Báo X"
+              },
+              {
+                "@type": "NewsArticle",
+                "headline": "Bài báo trong đồ thị",
+                "publisher": { "@type": "Organization", "name": "Tổ chức Y" },
+                "author": [{ "@type": "Person", "name": "Nguyễn Văn Z" }]
+              }
+            ]
+          }
+          </script>
+        </head>
+        <body>
+          <main><p>Nội dung bài viết.</p></main>
+        </body>
+      </html>
+    `;
+
+    const scraped: ScrapedContent = {
+      url: "https://example.com/article",
+      title: "Title",
+      text: "Nội dung bài viết.",
+      html,
+    };
+
+    const norm = normalizePublication(baseSearchResult, scraped, "allowed");
+    expect(norm.publication.publisherName).toBe("Tổ chức Y");
+    expect(norm.publication.authors).toEqual(["Nguyễn Văn Z"]);
+  });
 });

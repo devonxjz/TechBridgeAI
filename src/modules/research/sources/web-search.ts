@@ -15,7 +15,7 @@ export async function searchWeb(
   const findings: RawFinding[] = [];
 
   const resultsByQuery = await Promise.all(
-    queries.map(async (query) => {
+    queries.map(async (query, queryIndex) => {
       const rawResults = await searchAdapter.search(query, {
         maxResults: 10,
         language: "vi",
@@ -24,14 +24,22 @@ export async function searchWeb(
       });
 
       const selectedResults = applyDomainPolicy(rawResults, input.sourcePolicy, 5);
-
+      const providerRankByUrl = new Map(
+        rawResults.map((result, index) => [result.url, index + 1]),
+      );
       return selectedResults.map((result) => ({
         source: "web_search" as const,
         url: result.url,
         content: `[${result.title}]\n${result.snippet}`,
         extractedAt: new Date(),
         confidence: 0.6,
-        metadata: { query, title: result.title, publisherName: result.publisherName },
+        metadata: {
+          query,
+          queryIndex,
+          providerRank: providerRankByUrl.get(result.url),
+          title: result.title,
+          publisherName: result.publisherName,
+        },
       }));
     })
   );
@@ -42,6 +50,3 @@ export async function searchWeb(
 
   return findings;
 }
-
-
-
