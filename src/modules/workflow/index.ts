@@ -1,12 +1,3 @@
-// ═══════════════════════════════════════════════════════
-// PartnerIQ Research Workflow (LangGraph StateGraph)
-// Bounded parallel execution: 5 static source nodes fan-out,
-// fan-in to deterministic evidence preparation, downstream profile/diff/analyst.
-// ═══════════════════════════════════════════════════════
-
-import { END, START, StateGraph } from "@langchain/langgraph";
-import { dispatchCustomEvent } from "@langchain/core/callbacks/dispatch";
-import type { Callbacks } from "@langchain/core/callbacks/manager";
 import type {
   CompanyInput,
   CompanyProfile,
@@ -28,29 +19,42 @@ import {
   ResearchQueryBudgetExceededError,
   type ResearchBudget,
 } from "@/modules/research/budget";
-import { createResearchSourceRunners, type ResearchSourceRunner } from "@/modules/research";
+import {
+  createResearchSourceRunners,
+  type ResearchSourceRunner,
+} from "@/modules/research";
+import type { CrawlPolicy } from "@/modules/research/crawl-policy";
 import {
   observeResearchStep,
   updateResearchObservationOutcome,
 } from "@/observability/langfuse";
-import {
-  ResearchWorkflowAnnotation,
-  type ResearchWorkflowState,
-} from "./state";
+import type { ResearchWorkflowState } from "./state";
 
-const SSE_EVENT_NAME = "sse_event";
+const SOURCE_NAMES: SourceName[] = [
+  "web_search",
+  "website",
+  "news",
+  "registry",
+  "linkedin",
+];
+const SOURCE_EXECUTION_ORDER: SourceName[] = [
+  "web_search",
+  "news",
+  "website",
+  "registry",
+  "linkedin",
+];
+
+type EventEmitter = (event: StreamEvent) => void | Promise<void>;
 
 export interface ResearchWorkflowOptions {
   researchRunId: string;
   companyId?: string;
   existingProfile?: CompanyProfile | null;
   signal?: AbortSignal;
-  callbacks?: readonly unknown[];
   sessionId?: string;
   onComplete?: (state: ResearchWorkflowState) => void | Promise<void>;
 }
-
-import type { CrawlPolicy } from "@/modules/research/crawl-policy";
 
 export interface ResearchWorkflowDeps {
   search: SearchAdapter;
@@ -65,15 +69,17 @@ export interface ResearchWorkflowDeps {
 export interface ResearchWorkflow {
   stream(
     input: CompanyInput,
-    options: ResearchWorkflowOptions
+    options: ResearchWorkflowOptions,
   ): AsyncGenerator<StreamEvent, void, unknown>;
   run(
     input: CompanyInput,
-    options: ResearchWorkflowOptions
+    options: ResearchWorkflowOptions,
   ): Promise<ResearchWorkflowState>;
 }
 
-export function createResearchWorkflow(deps: ResearchWorkflowDeps): ResearchWorkflow {
+export function createResearchWorkflow(
+  deps: ResearchWorkflowDeps,
+): ResearchWorkflow {
   const runners = createResearchSourceRunners({
     search: deps.search,
     scraper: deps.scraper,
@@ -82,102 +88,218 @@ export function createResearchWorkflow(deps: ResearchWorkflowDeps): ResearchWork
     crawlPolicy: deps.crawlPolicy,
   });
 
-
   return {
-    async run(input, options) {
-      return await executeGraph(input, options, deps, runners);
-    },
+    run: (input, options) =>
+      executeWorkflow(input, options, deps, runners, () => undefined),
 
     async *stream(input, options) {
-      const activeSources: SourceName[] = ["web_search", "website", "news", "registry"];
-      if (input.linkedinUrl) {
-        activeSources.push("linkedin");
-      }
-
+      const activeSources = SOURCE_NAMES.filter(
+        (source) => source !== "linkedin" || Boolean(input.linkedinUrl),
+      );
       yield {
         event: "research:start",
         data: { sources: activeSources },
-      } as StreamEvent;
+      };
 
-      const app = compileResearchGraph(deps, runners, options);
-
-      const eventStream = app.streamEvents(
-        createInitialState(input, options),
-        {
-          version: "v2",
-          signal: options.signal,
-          callbacks: options.callbacks as Callbacks,
-          maxConcurrency: deps.guards.maxConcurrentSourceNodes,
-        }
+      const queue = new AsyncEventQueue<StreamEvent>();
+      const execution = executeWorkflow(
+        input,
+        options,
+        deps,
+        runners,
+        (event) => queue.push(event),
+      );
+      void execution.then(
+        () => queue.close(),
+        (error) => queue.fail(error),
       );
 
-      let fatalErrorEncountered: string | null = null;
-      let hasFindings = false;
-      let finalState: ResearchWorkflowState | null = null;
-
-      for await (const event of eventStream) {
-        if (event.event === "on_chain_end") {
-          const output = (event.data as { output?: unknown }).output;
-          if (isResearchWorkflowState(output)) {
-            finalState = output;
-          }
-        }
-        if (event.event === "on_custom_event" && event.name === SSE_EVENT_NAME) {
-          const sse = event.data as StreamEvent;
-          if (sse.event === "research:finding") {
-            hasFindings = true;
-          }
-          if (sse.event === "error" && !sse.data.source) {
-            fatalErrorEncountered = sse.data.message;
-          }
-          yield sse;
-        }
+      for await (const event of queue) {
+        yield event;
       }
-
-      if (finalState) {
-        await options.onComplete?.(finalState);
-      }
-
-      if (!hasFindings && !fatalErrorEncountered) {
-        yield {
-          event: "error",
-          data: { message: "Không tìm thấy thông tin nào về công ty này." },
-        } as StreamEvent;
-      }
+      await execution;
     },
   };
 }
 
-async function executeGraph(
+async function executeWorkflow(
   input: CompanyInput,
   options: ResearchWorkflowOptions,
   deps: ResearchWorkflowDeps,
-  runners: Record<SourceName, ResearchSourceRunner>
-): Promise<ResearchWorkflowState> {
-  const app = compileResearchGraph(deps, runners, options);
-
-  return (await app.invoke(
-    createInitialState(input, options),
-    {
-      signal: options.signal,
-      callbacks: options.callbacks as Callbacks,
-      maxConcurrency: deps.guards.maxConcurrentSourceNodes,
-    }
-  )) as ResearchWorkflowState;
-}
-
-function compileResearchGraph(
-  deps: ResearchWorkflowDeps,
   runners: Record<SourceName, ResearchSourceRunner>,
-  options: ResearchWorkflowOptions,
-) {
+  emit: EventEmitter,
+): Promise<ResearchWorkflowState> {
   const budget = createResearchBudget({
     maxLLMCalls: deps.guards.maxLLMCallsPerResearch,
     maxTokens: deps.guards.maxTokensPerResearch,
     maxQueries: deps.guards.maxQueriesPerResearch,
     maxConcurrentProviderCalls: deps.guards.maxConcurrentProviderCalls,
   });
-  return buildGraph(deps, runners, budget, options).compile();
+  const state = createInitialState(input, options);
+  const llmContext: LLMInvocationContext = {
+    signal: options.signal,
+    budget,
+  };
+
+  const sourceTasks = SOURCE_EXECUTION_ORDER.map((source) => async () => {
+    if (source === "linkedin" && !input.linkedinUrl) {
+      return skippedSource(source);
+    }
+
+    return observeResearchStep(`source.${source}`, async () => {
+      const result = await executeSourceRunner(
+        source,
+        runners[source],
+        input,
+        budget,
+        deps.guards,
+        emit,
+        options.signal,
+      );
+      if (result.status === "failed") {
+        updateResearchObservationOutcome("failed");
+      }
+      return result;
+    });
+  });
+
+  const settledSources = await settleWithConcurrency(
+    sourceTasks,
+    deps.guards.maxConcurrentSourceNodes,
+  );
+  state.sourceResults = settledSources.map((result, index) =>
+    result.status === "fulfilled"
+      ? result.value
+      : failedSource(SOURCE_EXECUTION_ORDER[index], result.reason),
+  ).sort(
+    (left, right) => SOURCE_NAMES.indexOf(left.source) - SOURCE_NAMES.indexOf(right.source),
+  );
+
+  throwIfAborted(options.signal);
+
+  await observeResearchStep("evidence.prepare", async () => {
+    const prepared = prepareEvidence(state.sourceResults);
+    state.findings = prepared.findings;
+    state.outcome = prepared.outcome;
+
+    if (state.findings.length === 0) {
+      const errorDetails = state.sourceResults
+        .filter((result) => result.error)
+        .map((result) => `${result.source}: ${result.error?.message}`);
+      const details = errorDetails.length > 0
+        ? ` Chi tiết: ${errorDetails.join(" | ")}`
+        : "";
+      state.fatalError = `Không tìm thấy thông tin nào về công ty này.${details}`;
+      state.outcome = "failed";
+      updateResearchObservationOutcome("failed");
+      await emit({
+        event: "error",
+        data: { message: state.fatalError },
+      });
+    }
+  });
+
+  if (!state.fatalError) {
+    await buildProfile(state, options, deps, llmContext, emit);
+  }
+  if (!state.fatalError && state.profile) {
+    await buildDiff(state, deps, emit);
+  }
+  if (!state.fatalError && state.profile) {
+    await analyzeProfile(state, deps, llmContext, emit);
+  }
+
+  throwIfAborted(options.signal);
+  await options.onComplete?.(state);
+  return state;
+}
+
+async function buildProfile(
+  state: ResearchWorkflowState,
+  options: ResearchWorkflowOptions,
+  deps: ResearchWorkflowDeps,
+  llmContext: LLMInvocationContext,
+  emit: EventEmitter,
+): Promise<void> {
+  await observeResearchStep("profile.build", async () => {
+    await emit({
+      event: "profile:building",
+      data: { message: "Đang tổng hợp hồ sơ công ty..." },
+    });
+    const targetCompanyId =
+      options.companyId || state.existingProfile?.id || options.researchRunId;
+
+    try {
+      state.profile = await deps.profile.buildProfile(
+        state.findings,
+        state.input,
+        targetCompanyId,
+        state.existingProfile?.version,
+        llmContext,
+      );
+    } catch (error) {
+      state.fatalError = error instanceof Error
+        ? error.message
+        : "Failed to build profile";
+      state.outcome = "failed";
+      updateResearchObservationOutcome("failed");
+      await emit({ event: "error", data: { message: state.fatalError } });
+    }
+  });
+}
+
+async function buildDiff(
+  state: ResearchWorkflowState,
+  deps: ResearchWorkflowDeps,
+  emit: EventEmitter,
+): Promise<void> {
+  await observeResearchStep("profile.diff", async () => {
+    if (!state.existingProfile || !state.profile) {
+      state.diff = null;
+      return;
+    }
+
+    try {
+      state.diff = deps.profile.diffProfiles(state.profile, state.existingProfile);
+    } catch (error) {
+      state.fatalError = error instanceof Error
+        ? error.message
+        : "Failed to build profile diff";
+      state.outcome = "failed";
+      updateResearchObservationOutcome("failed");
+      await emit({ event: "error", data: { message: state.fatalError } });
+    }
+  });
+}
+
+async function analyzeProfile(
+  state: ResearchWorkflowState,
+  deps: ResearchWorkflowDeps,
+  llmContext: LLMInvocationContext,
+  emit: EventEmitter,
+): Promise<void> {
+  await observeResearchStep("analyst.analyze", async () => {
+    if (!state.profile) return;
+
+    try {
+      state.report = await deps.analyst.analyze(
+        state.profile,
+        { previousProfile: state.existingProfile ?? undefined },
+        llmContext,
+      );
+    } catch (error) {
+      state.outcome = "partial";
+      updateResearchObservationOutcome("partial");
+      await emit({
+        event: "error",
+        data: {
+          message: error instanceof Error
+            ? error.message
+            : "Không thể phân tích hồ sơ.",
+        },
+      });
+    }
+  });
 }
 
 function createInitialState(
@@ -198,254 +320,55 @@ function createInitialState(
   };
 }
 
-function buildGraph(
-  deps: ResearchWorkflowDeps,
-  runners: Record<SourceName, ResearchSourceRunner>,
-  budget: ResearchBudget,
-  options: ResearchWorkflowOptions,
-) {
-  const { signal } = options;
-  const llmContext: LLMInvocationContext = {
-    signal,
-    budget,
-  };
-  // Source Nodes
-  const createSourceNode = (source: SourceName) => {
-    return async (state: typeof ResearchWorkflowAnnotation.State) =>
-      observeResearchStep(`source.${source}`, async () => {
-        if (source === "linkedin" && !state.input.linkedinUrl) {
-          return {
-            sourceResults: [
-              {
-                source: "linkedin" as SourceName,
-                status: "skipped" as const,
-                findings: [],
-                attempts: 0,
-                durationMs: 0,
-              },
-            ],
-          };
-        }
-
-        const runner = runners[source];
-        const result = await executeSourceRunner(
-          source,
-          runner,
-          state.input,
-          budget,
-          deps.guards,
-          signal,
-        );
-        if (result.status === "failed") {
-          updateResearchObservationOutcome("failed");
-        }
-        return {
-          sourceResults: [result],
-        };
-      });
-  };
-
-  const tracedNode = <T,>(
-    name: string,
-    node: (state: typeof ResearchWorkflowAnnotation.State) => Promise<T>,
-  ) =>
-    (state: typeof ResearchWorkflowAnnotation.State) =>
-      observeResearchStep(name, async () => {
-        const result = await node(state);
-        if (result && typeof result === "object") {
-          const update = result as { fatalError?: unknown; outcome?: unknown };
-          if (update.fatalError || update.outcome === "failed") {
-            updateResearchObservationOutcome("failed");
-          } else if (update.outcome === "partial") {
-            updateResearchObservationOutcome("partial");
-          }
-        }
-        return result;
-      });
-
-  return new StateGraph(ResearchWorkflowAnnotation)
-    .addNode("web_search", createSourceNode("web_search"))
-    .addNode("website", createSourceNode("website"))
-    .addNode("news", createSourceNode("news"))
-    .addNode("registry", createSourceNode("registry"))
-    .addNode("linkedin", createSourceNode("linkedin"))
-    .addNode("prepare_evidence", tracedNode("evidence.prepare", async (state) => {
-      const prepared = prepareEvidence(state.sourceResults);
-      if (prepared.findings.length === 0) {
-        const errorDetails = state.sourceResults
-          .filter((r) => r.error)
-          .map((r) => `${r.source}: ${r.error?.message}`);
-        const detailStr =
-          errorDetails.length > 0 ? ` Chi tiết: ${errorDetails.join(" | ")}` : "";
-        const message = `Không tìm thấy thông tin nào về công ty này.${detailStr}`;
-
-        await dispatchCustomEvent(SSE_EVENT_NAME, {
-          event: "error",
-          data: { message },
-        } as StreamEvent);
-        return {
-          findings: [],
-          outcome: "failed" as const,
-          fatalError: message,
-        };
-      }
-
-      return {
-        findings: prepared.findings,
-        outcome: prepared.outcome,
-      };
-    }))
-    .addNode("build_profile", tracedNode("profile.build", async (state) => {
-      if (state.fatalError || state.findings.length === 0) return {};
-
-      await dispatchCustomEvent(SSE_EVENT_NAME, {
-        event: "profile:building",
-        data: { message: "Đang tổng hợp hồ sơ công ty..." },
-      } as StreamEvent);
-
-      const targetCompanyId =
-        options.companyId || state.existingProfile?.id || options.researchRunId;
-      try {
-        const profile = await deps.profile.buildProfile(
-          state.findings,
-          state.input,
-          targetCompanyId,
-          state.existingProfile?.version,
-          llmContext,
-        );
-
-        return { profile };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to build profile";
-        await dispatchCustomEvent(SSE_EVENT_NAME, {
-          event: "error",
-          data: { message },
-        } as StreamEvent);
-        return { fatalError: message, outcome: "failed" as const };
-      }
-    }))
-    .addNode("build_diff", tracedNode("profile.diff", async (state) => {
-      if (state.fatalError || !state.profile) return {};
-
-      if (state.existingProfile) {
-        try {
-          const diff = deps.profile.diffProfiles(state.profile, state.existingProfile);
-          return { diff };
-        } catch (err) {
-          const message =
-            err instanceof Error ? err.message : "Failed to build profile diff";
-          await dispatchCustomEvent(SSE_EVENT_NAME, {
-            event: "error",
-            data: { message },
-          } as StreamEvent);
-          return { fatalError: message, outcome: "failed" as const };
-        }
-      } else {
-        return { diff: null };
-      }
-    }))
-    .addNode("analyze", tracedNode("analyst.analyze", async (state) => {
-      if (state.fatalError || !state.profile) return {};
-
-      try {
-        const report = await deps.analyst.analyze(
-          state.profile,
-          { previousProfile: state.existingProfile ?? undefined },
-          llmContext,
-        );
-
-        return { report };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Không thể phân tích hồ sơ.";
-        await dispatchCustomEvent(SSE_EVENT_NAME, {
-          event: "error",
-          data: { message },
-        } as StreamEvent);
-        return { outcome: "partial" as const };
-      }
-    }))
-    .addEdge(START, "web_search")
-    .addEdge(START, "website")
-    .addEdge(START, "news")
-    .addEdge(START, "registry")
-    .addEdge(START, "linkedin")
-    .addEdge("web_search", "prepare_evidence")
-    .addEdge("website", "prepare_evidence")
-    .addEdge("news", "prepare_evidence")
-    .addEdge("registry", "prepare_evidence")
-    .addEdge("linkedin", "prepare_evidence")
-    .addEdge("prepare_evidence", "build_profile")
-    .addEdge("build_profile", "build_diff")
-    .addEdge("build_diff", "analyze")
-    .addEdge("analyze", END);
-}
-
 async function executeSourceRunner(
   source: SourceName,
   runner: ResearchSourceRunner,
   input: CompanyInput,
   budget: ResearchBudget,
   guards: ResourceGuards,
-  signal?: AbortSignal
+  emit: EventEmitter,
+  signal?: AbortSignal,
 ): Promise<SourceExecutionResult> {
   const startTime = Date.now();
+  if (signal?.aborted) return failedSource(source, signal.reason, 1, 0);
 
-  if (signal?.aborted) {
-    return {
-      source,
-      status: "failed",
-      findings: [],
-      error: {
-        source,
-        type: "network_error",
-        message: "Execution aborted",
-        retryable: false,
-      },
-      attempts: 1,
-      durationMs: 0,
-    };
-  }
-
-  await dispatchCustomEvent(SSE_EVENT_NAME, {
+  await emit({
     event: "research:progress",
     data: { source, status: "started" },
-  } as StreamEvent);
+  });
 
   let attempts = 0;
   const maxRetries = guards.maxRetriesPerSource ?? 2;
   let lastError: SourceError | undefined;
 
   while (attempts <= maxRetries) {
-    attempts++;
+    attempts += 1;
     const timeoutSignal = AbortSignal.timeout(guards.sourceTimeoutMs);
     const attemptSignal = signal
       ? AbortSignal.any([signal, timeoutSignal])
       : timeoutSignal;
-    try {
-      if (signal?.aborted) {
-        throw new Error("Execution aborted");
-      }
 
+    try {
+      throwIfAborted(signal);
       const findings = await runWithAbortSignal(
         runner(input, { budget, signal: attemptSignal }),
         attemptSignal,
       );
 
       for (const finding of findings) {
-        await dispatchCustomEvent(SSE_EVENT_NAME, {
+        await emit({
           event: "research:finding",
           data: {
             source: finding.source,
             summary: finding.content.slice(0, 200),
             url: finding.url,
           },
-        } as StreamEvent);
+        });
       }
-
-      await dispatchCustomEvent(SSE_EVENT_NAME, {
+      await emit({
         event: "research:progress",
         data: { source, status: "done" },
-      } as StreamEvent);
+      });
 
       return {
         source,
@@ -454,48 +377,38 @@ async function executeSourceRunner(
         attempts,
         durationMs: Date.now() - startTime,
       };
-    } catch (err) {
-      if (err instanceof ResearchQueryBudgetExceededError) {
-        await dispatchCustomEvent(SSE_EVENT_NAME, {
+    } catch (error) {
+      if (error instanceof ResearchQueryBudgetExceededError) {
+        await emit({
           event: "research:progress",
           data: { source, status: "done" },
-        } as StreamEvent);
-        return {
-          source,
-          status: "skipped",
-          findings: [],
-          attempts,
-          durationMs: Date.now() - startTime,
-        };
+        });
+        return skippedSource(source, attempts, Date.now() - startTime);
       }
-      const message = err instanceof Error ? err.message : String(err);
-      const isTimeout = timeoutSignal.aborted || message.includes("timed out");
-      const retryable =
-        isRetryableSourceError(err, isTimeout, signal) &&
-        attempts <= maxRetries;
 
+      const message = error instanceof Error ? error.message : String(error);
+      const isTimeout = timeoutSignal.aborted && !signal?.aborted;
+      const retryable =
+        isRetryableSourceError(error, isTimeout, signal) &&
+        attempts <= maxRetries;
       lastError = {
         source,
         type: isTimeout ? "timeout" : "network_error",
         message,
         retryable,
       };
-
-      if (!retryable || attempts > maxRetries) {
-        break;
-      }
+      if (!retryable || attempts > maxRetries) break;
     }
   }
 
-  await dispatchCustomEvent(SSE_EVENT_NAME, {
+  await emit({
     event: "error",
     data: { message: lastError?.message ?? "Source execution failed", source },
-  } as StreamEvent);
-
-  await dispatchCustomEvent(SSE_EVENT_NAME, {
+  });
+  await emit({
     event: "research:progress",
     data: { source, status: "failed" },
-  } as StreamEvent);
+  });
 
   return {
     source,
@@ -504,6 +417,66 @@ async function executeSourceRunner(
     error: lastError,
     attempts,
     durationMs: Date.now() - startTime,
+  };
+}
+
+export async function settleWithConcurrency<T>(
+  tasks: ReadonlyArray<() => Promise<T>>,
+  concurrency: number,
+): Promise<PromiseSettledResult<T>[]> {
+  if (tasks.length === 0) return [];
+
+  const results = new Array<PromiseSettledResult<T>>(tasks.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(tasks.length, Math.max(1, concurrency));
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < tasks.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      try {
+        results[index] = { status: "fulfilled", value: await tasks[index]() };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  });
+
+  await Promise.allSettled(workers);
+  return results;
+}
+
+function skippedSource(
+  source: SourceName,
+  attempts = 0,
+  durationMs = 0,
+): SourceExecutionResult {
+  return {
+    source,
+    status: "skipped",
+    findings: [],
+    attempts,
+    durationMs,
+  };
+}
+
+function failedSource(
+  source: SourceName,
+  error: unknown,
+  attempts = 1,
+  durationMs = 0,
+): SourceExecutionResult {
+  return {
+    source,
+    status: "failed",
+    findings: [],
+    error: {
+      source,
+      type: "network_error",
+      message: error instanceof Error ? error.message : "Execution aborted",
+      retryable: false,
+    },
+    attempts,
+    durationMs,
   };
 }
 
@@ -534,7 +507,9 @@ function runWithAbortSignal<T>(
   signal: AbortSignal,
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
+    const onAbort = () => reject(
+      signal.reason ?? new DOMException("Execution aborted", "AbortError"),
+    );
     if (signal.aborted) {
       onAbort();
       return;
@@ -554,13 +529,54 @@ function runWithAbortSignal<T>(
   });
 }
 
-function isResearchWorkflowState(value: unknown): value is ResearchWorkflowState {
-  if (!value || typeof value !== "object") return false;
-  const state = value as Partial<ResearchWorkflowState>;
-  return (
-    typeof state.researchRunId === "string" &&
-    Array.isArray(state.sourceResults) &&
-    Array.isArray(state.findings) &&
-    typeof state.outcome === "string"
-  );
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw signal.reason ?? new DOMException("Execution aborted", "AbortError");
+}
+
+type QueueItem<T> =
+  | { type: "value"; value: T }
+  | { type: "done" }
+  | { type: "error"; error: unknown };
+
+class AsyncEventQueue<T> implements AsyncIterableIterator<T> {
+  private readonly items: QueueItem<T>[] = [];
+  private readonly waiters: Array<(item: QueueItem<T>) => void> = [];
+  private closed = false;
+
+  push(value: T): void {
+    if (this.closed) return;
+    this.enqueue({ type: "value", value });
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.enqueue({ type: "done" });
+  }
+
+  fail(error: unknown): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.enqueue({ type: "error", error });
+  }
+
+  async next(): Promise<IteratorResult<T>> {
+    const item = this.items.shift() ?? await new Promise<QueueItem<T>>(
+      (resolve) => this.waiters.push(resolve),
+    );
+    if (item.type === "error") throw item.error;
+    if (item.type === "done") return { done: true, value: undefined };
+    return { done: false, value: item.value };
+  }
+
+  [Symbol.asyncIterator](): AsyncIterableIterator<T> {
+    return this;
+  }
+
+  private enqueue(item: QueueItem<T>): void {
+    const waiter = this.waiters.shift();
+    if (waiter) waiter(item);
+    else this.items.push(item);
+  }
 }

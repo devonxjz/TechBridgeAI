@@ -39,7 +39,6 @@ import { createAnalystModule } from "@/modules/analyst";
 import { createResearchWorkflow } from "@/modules/workflow";
 import type { ResearchWorkflowState } from "@/modules/workflow/state";
 import {
-  createLangfuseCallback,
   emitResearchScores,
   flushLangfuse,
   traceResearch,
@@ -445,8 +444,6 @@ async function executeLiveWorkflow({
     cacheMatchedBy: "none",
     cacheAction: existingProfile ? "refresh" : "auto",
   };
-  const langfuseCallback = createLangfuseCallback(traceContext);
-
   let finalState: ResearchWorkflowState | null = null;
 
   await traceResearch(traceContext, async (traceId) => {
@@ -456,7 +453,6 @@ async function executeLiveWorkflow({
         companyId,
         existingProfile,
         signal: controller.signal,
-        callbacks: langfuseCallback ? [langfuseCallback] : undefined,
         onComplete: async (state) => {
           finalState = state;
           updateResearchTraceOutcome(state);

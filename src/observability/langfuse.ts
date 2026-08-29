@@ -3,7 +3,6 @@
 // Provides client-side masking, deterministic scoring, and OTel/LangChain callback
 // ═══════════════════════════════════════════════════════
 
-import { CallbackHandler } from "@langfuse/langchain";
 import { LangfuseClient } from "@langfuse/client";
 import { LangfuseSpanProcessor } from "@langfuse/otel";
 import {
@@ -366,44 +365,6 @@ export function initOpenTelemetry(): void {
     _sdk.start();
   } catch (err) {
     console.warn("[Langfuse] OpenTelemetry initialization failed:", err);
-  }
-}
-
-export function createLangfuseCallback(
-  context: ResearchTraceContext
-): CallbackHandler | null {
-  const isEnabled = isLangfuseEnabled();
-  const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
-  const secretKey = process.env.LANGFUSE_SECRET_KEY;
-
-  if (!isEnabled || !publicKey || !secretKey) {
-    return null;
-  }
-
-  try {
-    const isCacheHit = Boolean(context.cacheHit);
-    return new CallbackHandler({
-      sessionId: context.sessionId,
-      version: APP_VERSION,
-      tags: [
-        "workflow:research",
-        "surface:sse",
-        isCacheHit ? "cache:hit" : "cache:miss",
-      ],
-      traceMetadata: {
-        researchRunId: context.researchRunId,
-        companyId: context.companyId,
-        companyIdHash: hashCompanyIdentifier(context.companyId),
-        requestedSources: context.requestedSources,
-        appVersion: APP_VERSION,
-        cacheHit: isCacheHit,
-        cacheMatchedBy: context.cacheMatchedBy || "none",
-        cacheAction: context.cacheAction || "auto",
-      },
-    });
-  } catch (err) {
-    console.warn("[Langfuse] Failed to initialize CallbackHandler:", err);
-    return null;
   }
 }
 
