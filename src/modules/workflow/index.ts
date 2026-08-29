@@ -207,7 +207,6 @@ function buildGraph(
   const { signal } = options;
   const llmContext: LLMInvocationContext = {
     signal,
-    callbacks: options.callbacks,
     budget,
   };
   // Source Nodes

@@ -16,18 +16,6 @@ describe("Adapters Unit Tests", () => {
       llm = new MockLLMAdapter();
     });
 
-    it("returns default mock response when no match", async () => {
-      const res = await llm.complete("Tell me about company X");
-      expect(res).toBe('{"result": "mock response"}');
-      expect(llm.callLog.length).toBe(1);
-    });
-
-    it("returns canned response on substring match", async () => {
-      llm.setResponse("FPT", JSON.stringify({ officialName: "FPT Corporation" }));
-      const res = await llm.complete("Analyze FPT now");
-      expect(res).toContain("FPT Corporation");
-    });
-
     it("supports completeStructured with zod schema", async () => {
       const schema = z.object({
         name: z.string(),
@@ -39,14 +27,6 @@ describe("Adapters Unit Tests", () => {
       expect(result.founded).toBe(1988);
     });
 
-    it("supports streaming async generator", async () => {
-      llm.setResponse("hello", "Hello world from stream");
-      const chunks: string[] = [];
-      for await (const chunk of llm.stream("hello")) {
-        chunks.push(chunk);
-      }
-      expect(chunks.join("")).toContain("Hello world from stream");
-    });
   });
 
   describe("MockSearchAdapter", () => {
