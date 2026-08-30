@@ -42,7 +42,8 @@ jobs:
           cache-dependency-path: workers/research-gateway/package-lock.json
 
       - name: Install Worker dependencies
-        run: npm ci --prefix workers/research-gateway
+        working-directory: workers/research-gateway
+        run: npm ci --omit=optional
 
       - name: Check Worker
         run: npm run worker:check

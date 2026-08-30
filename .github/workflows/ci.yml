@@ -38,7 +38,8 @@ jobs:
 
       - name: Install Worker dependencies
         if: steps.worker.outputs.enabled == 'true'
-        run: npm ci --prefix workers/research-gateway
+        working-directory: workers/research-gateway
+        run: npm ci --omit=optional
 
       - name: Check Worker
         if: steps.worker.outputs.enabled == 'true'
