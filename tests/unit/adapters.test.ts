@@ -8,6 +8,9 @@ import {
 import { MemoryStorageAdapter } from "@/adapters/storage/memory";
 import type { CompanyProfile, ProfileDiff } from "@/lib/types";
 
+const TEST_TENANT_ID = "tenant-test";
+const TEST_STORAGE_CONTEXT = { tenantId: TEST_TENANT_ID, userId: "user-test" };
+
 describe("Adapters Unit Tests", () => {
   describe("MockLLMAdapter", () => {
     let llm: MockLLMAdapter;
@@ -182,10 +185,10 @@ describe("Adapters Unit Tests", () => {
       const p1 = createDummyProfile("comp-1", 1);
       const p2 = createDummyProfile("comp-1", 2);
 
-      await storage.saveProfile(p1);
-      await storage.saveProfile(p2);
+      await storage.saveProfile(TEST_STORAGE_CONTEXT, p1);
+      await storage.saveProfile(TEST_STORAGE_CONTEXT, p2);
 
-      const latest = await storage.getLatestProfile("comp-1");
+      const latest = await storage.getLatestProfile(TEST_STORAGE_CONTEXT, "comp-1");
       expect(latest?.version).toBe(2);
       expect(latest?.officialName).toBe("Test Corp v2");
     });
@@ -194,20 +197,20 @@ describe("Adapters Unit Tests", () => {
       const p1 = createDummyProfile("comp-1", 1);
       const p2 = createDummyProfile("comp-1", 2);
 
-      await storage.saveProfile(p1);
-      await storage.saveProfile(p2);
+      await storage.saveProfile(TEST_STORAGE_CONTEXT, p1);
+      await storage.saveProfile(TEST_STORAGE_CONTEXT, p2);
 
-      const v1 = await storage.getProfile("comp-1", 1);
+      const v1 = await storage.getProfile(TEST_STORAGE_CONTEXT, "comp-1", 1);
       expect(v1?.version).toBe(1);
       expect(v1?.officialName).toBe("Test Corp v1");
     });
 
     it("lists latest profile across distinct companies", async () => {
-      await storage.saveProfile(createDummyProfile("comp-1", 1));
-      await storage.saveProfile(createDummyProfile("comp-1", 2));
-      await storage.saveProfile(createDummyProfile("comp-2", 1));
+      await storage.saveProfile(TEST_STORAGE_CONTEXT, createDummyProfile("comp-1", 1));
+      await storage.saveProfile(TEST_STORAGE_CONTEXT, createDummyProfile("comp-1", 2));
+      await storage.saveProfile(TEST_STORAGE_CONTEXT, createDummyProfile("comp-2", 1));
 
-      const list = await storage.listProfiles();
+      const list = await storage.listProfiles(TEST_STORAGE_CONTEXT);
       expect(list.length).toBe(2);
     });
 
@@ -220,8 +223,8 @@ describe("Adapters Unit Tests", () => {
         summary: "Updated description",
       };
 
-      await storage.saveDiff(diff);
-      const diffs = await storage.getDiffs("comp-1");
+      await storage.saveDiff(TEST_STORAGE_CONTEXT, diff);
+      const diffs = await storage.getDiffs(TEST_STORAGE_CONTEXT, "comp-1");
       expect(diffs.length).toBe(1);
       expect(diffs[0].summary).toBe("Updated description");
     });
@@ -233,7 +236,7 @@ describe("Adapters Unit Tests", () => {
         name: "tập đoàn vingroup",
       };
 
-      const resolvedId = await storage.resolveOrCreateIdentity(identity, "company-a");
+      const resolvedId = await storage.resolveOrCreateIdentity(TEST_STORAGE_CONTEXT, identity, "company-a");
       expect(resolvedId).toBe("company-a");
 
       const draftSnapshot = {
@@ -248,16 +251,16 @@ describe("Adapters Unit Tests", () => {
         diff: null,
       };
 
-      const saved = await storage.persistResearchSnapshot(identity, draftSnapshot);
+      const saved = await storage.persistResearchSnapshot(TEST_STORAGE_CONTEXT, identity, draftSnapshot);
       expect(saved.profile.id).toBe("company-a");
       expect(saved.lastSyncedAt).toBeDefined();
 
-      const candidates = await storage.findIdentityCandidates(identity);
+      const candidates = await storage.findIdentityCandidates(TEST_STORAGE_CONTEXT, identity);
       expect(candidates).toEqual([
         expect.objectContaining({ companyId: "company-a", taxId: "0101245486" }),
       ]);
 
-      const snapshot = await storage.getLatestCompleteSnapshot("company-a");
+      const snapshot = await storage.getLatestCompleteSnapshot(TEST_STORAGE_CONTEXT, "company-a");
       expect(snapshot).toMatchObject({
         profile: { id: "company-a", version: 1 },
         report: { companyId: "company-a" },
@@ -272,7 +275,7 @@ describe("Adapters Unit Tests", () => {
         name: "tập đoàn vingroup",
       };
 
-      await storage.resolveOrCreateIdentity(identity, "company-a");
+      await storage.resolveOrCreateIdentity(TEST_STORAGE_CONTEXT, identity, "company-a");
 
       const v1Draft = {
         profile: createDummyProfile("company-a", 1),
@@ -285,7 +288,7 @@ describe("Adapters Unit Tests", () => {
         },
         diff: null,
       };
-      await storage.persistResearchSnapshot(identity, v1Draft);
+      await storage.persistResearchSnapshot(TEST_STORAGE_CONTEXT, identity, v1Draft);
 
       const v2Diff: ProfileDiff = {
         companyId: "company-a",
@@ -306,9 +309,9 @@ describe("Adapters Unit Tests", () => {
         },
         diff: v2Diff,
       };
-      await storage.persistResearchSnapshot(identity, v2Draft);
+      await storage.persistResearchSnapshot(TEST_STORAGE_CONTEXT, identity, v2Draft);
 
-      const snapshot = await storage.getLatestCompleteSnapshot("company-a");
+      const snapshot = await storage.getLatestCompleteSnapshot(TEST_STORAGE_CONTEXT, "company-a");
       expect(snapshot).toMatchObject({
         profile: { id: "company-a", version: 2 },
         report: { companyId: "company-a", executiveSummary: "Summary v2" },
@@ -318,12 +321,14 @@ describe("Adapters Unit Tests", () => {
 
     it("throws IdentityConflictError when tax ID is assigned to another company", async () => {
       await storage.resolveOrCreateIdentity(
+        TEST_STORAGE_CONTEXT,
         { taxId: "0101245486", domain: "vingroup.net", name: "vingroup" },
         "company-a"
       );
 
       await expect(
         storage.persistResearchSnapshot(
+          TEST_STORAGE_CONTEXT,
           { taxId: "0101245486", domain: "other.vn", name: "other" },
           {
             profile: createDummyProfile("company-b", 1),

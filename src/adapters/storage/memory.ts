@@ -14,33 +14,64 @@ import {
 } from "@/modules/cache";
 import type {
   StorageAdapter,
+  StorageContext,
   StorageReadOptions,
   StorageWriteOptions,
 } from "./types";
 
+interface TenantStorage {
+  identities: Map<string, IdentityCandidate>;
+  profiles: Map<string, Map<number, CompanyProfile>>;
+  reports: Map<string, Map<number, ResearchSnapshot["report"]>>;
+  timestamps: Map<string, Map<number, string>>;
+  diffs: Map<string, ProfileDiff[]>;
+}
+
+function createTenantStorage(): TenantStorage {
+  return {
+    identities: new Map(),
+    profiles: new Map(),
+    reports: new Map(),
+    timestamps: new Map(),
+    diffs: new Map(),
+  };
+}
+
+const LEGACY_TENANT_ID = "__legacy__";
+
+type ResearchSnapshotDraft = Omit<ResearchSnapshot, "lastSyncedAt">;
+
 export class MemoryStorageAdapter implements StorageAdapter {
-  private identities: Map<string, IdentityCandidate> = new Map();
-  private profiles: Map<string, Map<number, CompanyProfile>> = new Map();
-  private reports: Map<string, Map<number, ResearchSnapshot["report"]>> = new Map();
-  private timestamps: Map<string, Map<number, string>> = new Map();
-  private diffs: Map<string, ProfileDiff[]> = new Map();
+  private tenants: Map<string, TenantStorage> = new Map();
+
+  private tenant(tenantId: string): TenantStorage {
+    let storage = this.tenants.get(tenantId);
+    if (!storage) {
+      storage = createTenantStorage();
+      this.tenants.set(tenantId, storage);
+    }
+    return storage;
+  }
 
   async saveProfile(
+    context: StorageContext,
     profile: CompanyProfile,
     options?: StorageWriteOptions,
   ): Promise<void> {
     options?.signal?.throwIfAborted();
-    if (!this.profiles.has(profile.id)) {
-      this.profiles.set(profile.id, new Map());
+    const { profiles } = this.tenant(context.tenantId);
+    if (!profiles.has(profile.id)) {
+      profiles.set(profile.id, new Map());
     }
-    this.profiles.get(profile.id)!.set(profile.version, structuredClone(profile));
+    profiles.get(profile.id)!.set(profile.version, structuredClone(profile));
   }
 
   async getProfile(
+    context: StorageContext,
     companyId: string,
     version?: number
   ): Promise<CompanyProfile | null> {
-    const versions = this.profiles.get(companyId);
+    const versions = this.tenant(context.tenantId).profiles.get(companyId);
     if (!versions) return null;
 
     if (version !== undefined) {
@@ -48,15 +79,16 @@ export class MemoryStorageAdapter implements StorageAdapter {
       return p ? structuredClone(p) : null;
     }
 
-    return this.getLatestProfile(companyId);
+    return this.getLatestProfile(context, companyId);
   }
 
   async getLatestProfile(
+    context: StorageContext,
     companyId: string,
     options?: StorageReadOptions,
   ): Promise<CompanyProfile | null> {
     options?.signal?.throwIfAborted();
-    const versions = this.profiles.get(companyId);
+    const versions = this.tenant(context.tenantId).profiles.get(companyId);
     if (!versions || versions.size === 0) return null;
 
     const maxVersion = Math.max(...versions.keys());
@@ -64,9 +96,9 @@ export class MemoryStorageAdapter implements StorageAdapter {
     return p ? structuredClone(p) : null;
   }
 
-  async listProfiles(): Promise<CompanyProfile[]> {
+  async listProfiles(context: StorageContext): Promise<CompanyProfile[]> {
     const result: CompanyProfile[] = [];
-    for (const versions of this.profiles.values()) {
+    for (const versions of this.tenant(context.tenantId).profiles.values()) {
       const maxVersion = Math.max(...versions.keys());
       const latest = versions.get(maxVersion);
       if (latest) result.push(structuredClone(latest));
@@ -75,28 +107,31 @@ export class MemoryStorageAdapter implements StorageAdapter {
   }
 
   async saveDiff(
+    context: StorageContext,
     diff: ProfileDiff,
     options?: StorageWriteOptions,
   ): Promise<void> {
     options?.signal?.throwIfAborted();
-    if (!this.diffs.has(diff.companyId)) {
-      this.diffs.set(diff.companyId, []);
+    const { diffs } = this.tenant(context.tenantId);
+    if (!diffs.has(diff.companyId)) {
+      diffs.set(diff.companyId, []);
     }
-    this.diffs.get(diff.companyId)!.push(structuredClone(diff));
+    diffs.get(diff.companyId)!.push(structuredClone(diff));
   }
 
-  async getDiffs(companyId: string): Promise<ProfileDiff[]> {
-    const d = this.diffs.get(companyId) ?? [];
+  async getDiffs(context: StorageContext, companyId: string): Promise<ProfileDiff[]> {
+    const d = this.tenant(context.tenantId).diffs.get(companyId) ?? [];
     return structuredClone(d);
   }
 
   async findIdentityCandidates(
+    context: StorageContext,
     identity: NormalizedCompanyIdentity,
     options?: StorageReadOptions,
   ): Promise<IdentityCandidate[]> {
     options?.signal?.throwIfAborted();
     const result: IdentityCandidate[] = [];
-    for (const cand of this.identities.values()) {
+    for (const cand of this.tenant(context.tenantId).identities.values()) {
       const matchTax = identity.taxId !== null && cand.taxId === identity.taxId;
       const matchDomain = identity.domain !== null && cand.domain === identity.domain;
       const matchName = cand.name === identity.name;
@@ -108,12 +143,14 @@ export class MemoryStorageAdapter implements StorageAdapter {
   }
 
   async getLatestCompleteSnapshot(
+    context: StorageContext,
     companyId: string,
     options?: StorageReadOptions,
   ): Promise<ResearchSnapshot | null> {
     options?.signal?.throwIfAborted();
-    const profileMap = this.profiles.get(companyId);
-    const reportMap = this.reports.get(companyId);
+    const storage = this.tenant(context.tenantId);
+    const profileMap = storage.profiles.get(companyId);
+    const reportMap = storage.reports.get(companyId);
     if (!profileMap || !reportMap) return null;
 
     const completeVersions = Array.from(profileMap.keys())
@@ -124,10 +161,10 @@ export class MemoryStorageAdapter implements StorageAdapter {
     const latestVersion = completeVersions[0];
     const profile = structuredClone(profileMap.get(latestVersion)!);
     const report = structuredClone(reportMap.get(latestVersion)!);
-    const companyDiffs = this.diffs.get(companyId) ?? [];
+    const companyDiffs = storage.diffs.get(companyId) ?? [];
     const diff = companyDiffs.find((d) => d.toVersion === latestVersion) ?? null;
     const lastSyncedAt =
-      this.timestamps.get(companyId)?.get(latestVersion) ??
+      storage.timestamps.get(companyId)?.get(latestVersion) ??
       profile.lastUpdated.toISOString();
 
     return {
@@ -139,15 +176,16 @@ export class MemoryStorageAdapter implements StorageAdapter {
   }
 
   async resolveOrCreateIdentity(
+    context: StorageContext,
     identity: NormalizedCompanyIdentity,
     candidateId: string,
     options?: StorageWriteOptions,
   ): Promise<string> {
     options?.signal?.throwIfAborted();
-    // 1. If taxId provided
+    const { identities } = this.tenant(context.tenantId);
     if (identity.taxId) {
       let taxOwnerId: string | null = null;
-      for (const cand of this.identities.values()) {
+      for (const cand of identities.values()) {
         if (cand.taxId === identity.taxId) {
           taxOwnerId = cand.companyId;
           break;
@@ -155,7 +193,7 @@ export class MemoryStorageAdapter implements StorageAdapter {
       }
 
       if (taxOwnerId && identity.domain) {
-        const domainMatches = Array.from(this.identities.values()).filter(
+        const domainMatches = Array.from(identities.values()).filter(
           (c) => c.domain === identity.domain
         );
         if (
@@ -170,7 +208,7 @@ export class MemoryStorageAdapter implements StorageAdapter {
         return taxOwnerId;
       }
 
-      this.identities.set(candidateId, {
+      identities.set(candidateId, {
         companyId: candidateId,
         taxId: identity.taxId,
         domain: identity.domain,
@@ -179,15 +217,14 @@ export class MemoryStorageAdapter implements StorageAdapter {
       return candidateId;
     }
 
-    // 2. If domain provided
     if (identity.domain) {
-      for (const cand of this.identities.values()) {
+      for (const cand of identities.values()) {
         if (cand.domain === identity.domain && cand.name === identity.name) {
           return cand.companyId;
         }
       }
 
-      this.identities.set(candidateId, {
+      identities.set(candidateId, {
         companyId: candidateId,
         taxId: null,
         domain: identity.domain,
@@ -196,8 +233,7 @@ export class MemoryStorageAdapter implements StorageAdapter {
       return candidateId;
     }
 
-    // 3. Name only
-    this.identities.set(candidateId, {
+    identities.set(candidateId, {
       companyId: candidateId,
       taxId: null,
       domain: null,
@@ -207,25 +243,42 @@ export class MemoryStorageAdapter implements StorageAdapter {
   }
 
   async persistResearchSnapshot(
+    context: StorageContext,
     identity: NormalizedCompanyIdentity,
-    snapshot: Omit<ResearchSnapshot, "lastSyncedAt">,
+    snapshot: ResearchSnapshotDraft,
     options?: StorageWriteOptions,
+  ): Promise<ResearchSnapshot>;
+  async persistResearchSnapshot(
+    identity: NormalizedCompanyIdentity,
+    snapshot: ResearchSnapshotDraft,
+    options?: StorageWriteOptions,
+  ): Promise<ResearchSnapshot>;
+  async persistResearchSnapshot(
+    contextOrIdentity: StorageContext | NormalizedCompanyIdentity,
+    identityOrSnapshot: NormalizedCompanyIdentity | ResearchSnapshotDraft,
+    snapshotOrOptions?: ResearchSnapshotDraft | StorageWriteOptions,
+    maybeOptions?: StorageWriteOptions,
   ): Promise<ResearchSnapshot> {
+    const contextCall = "tenantId" in contextOrIdentity && "userId" in contextOrIdentity;
+    const tenantId = contextCall ? contextOrIdentity.tenantId : LEGACY_TENANT_ID;
+    const identity = contextCall ? identityOrSnapshot as NormalizedCompanyIdentity : contextOrIdentity;
+    const snapshot = (contextCall ? snapshotOrOptions : identityOrSnapshot) as ResearchSnapshotDraft;
+    const options = contextCall ? maybeOptions : snapshotOrOptions as StorageWriteOptions | undefined;
+
     options?.signal?.throwIfAborted();
+    const storage = this.tenant(tenantId);
     const companyId = snapshot.profile.id;
 
-    // Check conflict
     if (identity.taxId) {
-      for (const cand of this.identities.values()) {
+      for (const cand of storage.identities.values()) {
         if (cand.taxId === identity.taxId && cand.companyId !== companyId) {
           throw new IdentityConflictError();
         }
       }
     }
 
-    // Update / insert identity
-    const existingIdentity = this.identities.get(companyId);
-    this.identities.set(companyId, {
+    const existingIdentity = storage.identities.get(companyId);
+    storage.identities.set(companyId, {
       companyId,
       taxId: identity.taxId ?? existingIdentity?.taxId ?? null,
       domain: identity.domain ?? existingIdentity?.domain ?? null,
@@ -235,40 +288,36 @@ export class MemoryStorageAdapter implements StorageAdapter {
     const nowIso = new Date().toISOString();
     const version = snapshot.profile.version;
 
-    // Save profile
-    if (!this.profiles.has(companyId)) {
-      this.profiles.set(companyId, new Map());
+    if (!storage.profiles.has(companyId)) {
+      storage.profiles.set(companyId, new Map());
     }
     const profileToSave = {
       ...snapshot.profile,
       lastUpdated: new Date(nowIso),
     };
-    this.profiles.get(companyId)!.set(version, structuredClone(profileToSave));
+    storage.profiles.get(companyId)!.set(version, structuredClone(profileToSave));
 
-    // Save report
-    if (!this.reports.has(companyId)) {
-      this.reports.set(companyId, new Map());
+    if (!storage.reports.has(companyId)) {
+      storage.reports.set(companyId, new Map());
     }
-    this.reports.get(companyId)!.set(version, structuredClone(snapshot.report));
+    storage.reports.get(companyId)!.set(version, structuredClone(snapshot.report));
 
-    // Save timestamp
-    if (!this.timestamps.has(companyId)) {
-      this.timestamps.set(companyId, new Map());
+    if (!storage.timestamps.has(companyId)) {
+      storage.timestamps.set(companyId, new Map());
     }
-    this.timestamps.get(companyId)!.set(version, nowIso);
+    storage.timestamps.get(companyId)!.set(version, nowIso);
 
-    // Save diff
     if (snapshot.diff) {
-      if (!this.diffs.has(companyId)) {
-        this.diffs.set(companyId, []);
+      if (!storage.diffs.has(companyId)) {
+        storage.diffs.set(companyId, []);
       }
-      const existingDiffIndex = this.diffs
+      const existingDiffIndex = storage.diffs
         .get(companyId)!
         .findIndex((d) => d.toVersion === version);
       if (existingDiffIndex >= 0) {
-        this.diffs.get(companyId)![existingDiffIndex] = structuredClone(snapshot.diff);
+        storage.diffs.get(companyId)![existingDiffIndex] = structuredClone(snapshot.diff);
       } else {
-        this.diffs.get(companyId)!.push(structuredClone(snapshot.diff));
+        storage.diffs.get(companyId)!.push(structuredClone(snapshot.diff));
       }
     }
 
@@ -280,19 +329,19 @@ export class MemoryStorageAdapter implements StorageAdapter {
     };
   }
 
-  // Test helpers
   clear(): void {
-    this.identities.clear();
-    this.profiles.clear();
-    this.reports.clear();
-    this.timestamps.clear();
-    this.diffs.clear();
+    this.tenants.clear();
   }
 
-  getProfileCount(): number {
+  getProfileCount(tenantId?: string): number {
     let count = 0;
-    for (const versions of this.profiles.values()) {
-      count += versions.size;
+    const tenants = tenantId
+      ? [this.tenant(tenantId)]
+      : Array.from(this.tenants.values());
+    for (const storage of tenants) {
+      for (const versions of storage.profiles.values()) {
+        count += versions.size;
+      }
     }
     return count;
   }

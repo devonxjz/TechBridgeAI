@@ -48,7 +48,10 @@ export interface ResearchTraceContext {
 }
 
 export function hashCompanyIdentifier(identifier: string): string {
-  const salt = process.env.LANGFUSE_SALT || "partneriq-telemetry-salt";
+  const salt = process.env.LANGFUSE_SALT;
+  if (!salt) {
+    throw new Error("LANGFUSE_SALT is required for telemetry identifiers");
+  }
   return crypto.createHmac("sha256", salt).update(identifier).digest("hex");
 }
 
@@ -250,7 +253,6 @@ export async function traceResearch<T>(
           process.env.LANGFUSE_TRACING_ENVIRONMENT || "production",
         metadata: {
           researchRunId: context.researchRunId,
-          companyId: context.companyId,
           companyIdHash: hashCompanyIdentifier(context.companyId),
           requestedSources: context.requestedSources.join(","),
           cacheHit: isCacheHit ? "true" : "false",

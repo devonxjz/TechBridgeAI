@@ -45,6 +45,30 @@ const SOURCE_EXECUTION_ORDER: SourceName[] = [
   "linkedin",
 ];
 
+const MAX_RETRY_DELAY_MS = 30_000;
+
+export function retryDelayMs(
+  attempt: number,
+  baseDelayMs = 1_000,
+  jitterRatio = 0.2,
+): number {
+  const exponential = Math.min(MAX_RETRY_DELAY_MS, baseDelayMs * 2 ** (attempt - 1));
+  const jitter = exponential * jitterRatio * Math.random();
+  return Math.min(MAX_RETRY_DELAY_MS, Math.round(exponential + jitter));
+}
+
+export function getRetryAfterMs(
+  value: string | null | undefined,
+  now = Date.now(),
+): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return undefined;
+  return Math.max(0, timestamp - now);
+}
+
 type EventEmitter = (event: StreamEvent) => void | Promise<void>;
 
 export interface ResearchWorkflowOptions {
@@ -398,6 +422,14 @@ async function executeSourceRunner(
         retryable,
       };
       if (!retryable || attempts > maxRetries) break;
+
+      const retryAfterMs = getRetryAfterMs(
+        getRetryAfterHeader(error),
+      );
+      await delayWithAbort(
+        retryAfterMs ?? retryDelayMs(attempts),
+        signal,
+      );
     }
   }
 
@@ -478,6 +510,26 @@ function failedSource(
     attempts,
     durationMs,
   };
+}
+
+function getRetryAfterHeader(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const headers = (error as { headers?: Headers | Record<string, string> }).headers;
+  if (!headers) return undefined;
+  if (headers instanceof Headers) return headers.get("retry-after") ?? undefined;
+  return headers["retry-after"] ?? headers["Retry-After"];
+}
+
+function delayWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new DOMException("Execution aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function isRetryableSourceError(

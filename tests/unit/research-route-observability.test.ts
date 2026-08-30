@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStorageAdapter } from "@/adapters/storage/memory";
+import {
+  configureTestGatewayKeys,
+  createSignedResearchRequest,
+} from "@/../tests/helpers/signed-research-request";
 
 const observabilityMocks = vi.hoisted(() => ({
   emitResearchScores: vi.fn(async () => undefined),
@@ -44,22 +48,18 @@ vi.mock("@/observability/langfuse", () => ({
   updateResearchTraceOutcome: vi.fn(),
 }));
 
-import { NextRequest } from "next/server";
 import { POST } from "@/app/api/research/route";
 
 describe("Research route observability", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockStorage = new MemoryStorageAdapter();
+    configureTestGatewayKeys();
   });
 
   it("marks and scores an unexpected workflow failure", async () => {
     const response = await POST(
-      new NextRequest("http://localhost:3000/api/research", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: { name: "FPT" } }),
-      }),
+      await createSignedResearchRequest({ input: { name: "FPT" } }),
     );
 
     const body = await response.text();

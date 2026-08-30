@@ -222,6 +222,7 @@ describe("Langfuse Observability & Privacy Minimization", () => {
     vi.stubEnv("LANGFUSE_ENABLED", "true");
     vi.stubEnv("LANGFUSE_PUBLIC_KEY", "pk-test");
     vi.stubEnv("LANGFUSE_SECRET_KEY", "sk-test");
+    vi.stubEnv("LANGFUSE_SALT", "test-secret-salt");
     let receivedTraceId: string | undefined;
 
     await traceResearch(
@@ -336,6 +337,7 @@ describe("Langfuse Observability & Privacy Minimization", () => {
     vi.stubEnv("LANGFUSE_ENABLED", "true");
     vi.stubEnv("LANGFUSE_PUBLIC_KEY", "pk-test");
     vi.stubEnv("LANGFUSE_SECRET_KEY", "sk-test");
+    vi.stubEnv("LANGFUSE_SALT", "test-secret-salt");
 
     await traceResearch(
       {

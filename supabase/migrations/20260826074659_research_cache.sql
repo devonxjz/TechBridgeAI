@@ -190,6 +190,7 @@ CREATE OR REPLACE FUNCTION public.persist_research_snapshot(
   p_domain text,
   p_name text,
   p_version integer,
+  p_expected_version integer,
   p_profile_data jsonb,
   p_analysis_report jsonb,
   p_diff_data jsonb
@@ -237,7 +238,15 @@ BEGIN
 
   v_official_name := COALESCE(p_profile_data->>'officialName', p_name);
 
-  -- 4. Upsert company_profiles
+  -- 4. Reject stale writers before writing a version.
+  IF p_expected_version <> COALESCE(
+    (SELECT MAX(version) FROM public.company_profiles WHERE id = p_company_id),
+    0
+  ) THEN
+    RAISE EXCEPTION 'version_conflict';
+  END IF;
+
+  -- 5. Upsert company_profiles
   INSERT INTO public.company_profiles (
     id,
     version,
@@ -292,5 +301,5 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.persist_research_snapshot(text, text, text, text, integer, jsonb, jsonb, jsonb) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.persist_research_snapshot(text, text, text, text, integer, jsonb, jsonb, jsonb) TO service_role;
+REVOKE EXECUTE ON FUNCTION public.persist_research_snapshot(text, text, text, text, integer, integer, jsonb, jsonb, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.persist_research_snapshot(text, text, text, text, integer, integer, jsonb, jsonb, jsonb) TO service_role;

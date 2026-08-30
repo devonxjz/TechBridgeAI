@@ -18,6 +18,7 @@ import {
 } from "@/modules/cache";
 import type {
   StorageAdapter,
+  StorageContext,
   StorageReadOptions,
   StorageWriteOptions,
 } from "./types";
@@ -47,6 +48,7 @@ export class SupabaseStorageAdapter implements StorageAdapter {
   }
 
   async saveProfile(
+    context: StorageContext,
     profile: CompanyProfile,
     options?: StorageWriteOptions,
   ): Promise<void> {
@@ -54,13 +56,14 @@ export class SupabaseStorageAdapter implements StorageAdapter {
       .from("company_profiles")
       .upsert(
         {
+          tenant_id: context.tenantId,
           id: profile.id,
           version: profile.version,
           official_name: profile.officialName,
           data: profile,
           updated_at: new Date().toISOString(),
         },
-        { onConflict: "id,version" },
+        { onConflict: "tenant_id,id,version" },
       );
     if (options?.signal) query.abortSignal(options.signal);
     const { error } = await query;
@@ -71,6 +74,7 @@ export class SupabaseStorageAdapter implements StorageAdapter {
   }
 
   async getProfile(
+    context: StorageContext,
     companyId: string,
     version?: number
   ): Promise<CompanyProfile | null> {
@@ -78,6 +82,7 @@ export class SupabaseStorageAdapter implements StorageAdapter {
       const { data, error } = await this.client
         .from("company_profiles")
         .select("data")
+        .eq("tenant_id", context.tenantId)
         .eq("id", companyId)
         .eq("version", version)
         .maybeSingle();
@@ -89,16 +94,18 @@ export class SupabaseStorageAdapter implements StorageAdapter {
       return data ? (data.data as CompanyProfile) : null;
     }
 
-    return this.getLatestProfile(companyId);
+    return this.getLatestProfile(context, companyId);
   }
 
   async getLatestProfile(
+    context: StorageContext,
     companyId: string,
     options?: StorageReadOptions,
   ): Promise<CompanyProfile | null> {
     const query = this.client
       .from("company_profiles")
       .select("data")
+      .eq("tenant_id", context.tenantId)
       .eq("id", companyId)
       .order("version", { ascending: false })
       .limit(1);
@@ -112,10 +119,11 @@ export class SupabaseStorageAdapter implements StorageAdapter {
     return data ? (data.data as CompanyProfile) : null;
   }
 
-  async listProfiles(): Promise<CompanyProfile[]> {
+  async listProfiles(context: StorageContext): Promise<CompanyProfile[]> {
     const { data, error } = await this.client
       .from("company_profiles")
       .select("data")
+      .eq("tenant_id", context.tenantId)
       .order("updated_at", { ascending: false })
       .limit(50);
 
@@ -140,6 +148,7 @@ export class SupabaseStorageAdapter implements StorageAdapter {
   }
 
   async saveDiff(
+    context: StorageContext,
     diff: ProfileDiff,
     options?: StorageWriteOptions,
   ): Promise<void> {
@@ -148,6 +157,7 @@ export class SupabaseStorageAdapter implements StorageAdapter {
       .from("company_diffs")
       .upsert(
         {
+          tenant_id: context.tenantId,
           id: diffId,
           company_id: diff.companyId,
           from_version: diff.fromVersion,
@@ -155,7 +165,7 @@ export class SupabaseStorageAdapter implements StorageAdapter {
           data: diff,
           created_at: new Date().toISOString(),
         },
-        { onConflict: "id" },
+        { onConflict: "tenant_id,id" },
       );
     if (options?.signal) query.abortSignal(options.signal);
     const { error } = await query;
@@ -165,10 +175,11 @@ export class SupabaseStorageAdapter implements StorageAdapter {
     }
   }
 
-  async getDiffs(companyId: string): Promise<ProfileDiff[]> {
+  async getDiffs(context: StorageContext, companyId: string): Promise<ProfileDiff[]> {
     const { data, error } = await this.client
       .from("company_diffs")
       .select("data")
+      .eq("tenant_id", context.tenantId)
       .eq("company_id", companyId)
       .order("created_at", { ascending: false });
 
@@ -182,10 +193,12 @@ export class SupabaseStorageAdapter implements StorageAdapter {
   // ─── Cache & Snapshot RPCs ───
 
   async findIdentityCandidates(
+    context: StorageContext,
     identity: NormalizedCompanyIdentity,
     options?: StorageReadOptions,
   ): Promise<IdentityCandidate[]> {
-    const query = this.client.rpc("lookup_company_identities", {
+    const query = this.client.rpc("lookup_company_identities_v2", {
+      p_tenant_id: context.tenantId,
       p_tax_id: identity.taxId,
       p_domain: identity.domain,
       p_name: identity.name,
@@ -220,61 +233,41 @@ export class SupabaseStorageAdapter implements StorageAdapter {
   }
 
   async getLatestCompleteSnapshot(
+    context: StorageContext,
     companyId: string,
     options?: StorageReadOptions,
   ): Promise<ResearchSnapshot | null> {
-    const profileQuery = this.client
-      .from("company_profiles")
-      .select("version, data, analysis_report, updated_at")
-      .eq("id", companyId)
-      .not("analysis_report", "is", null)
-      .order("version", { ascending: false })
-      .limit(1);
+    const query = this.client.rpc("get_latest_research_snapshot_v2", {
+      p_tenant_id: context.tenantId,
+      p_company_id: companyId,
+    });
+    if (options?.signal) query.abortSignal(options.signal);
 
-    if (options?.signal) profileQuery.abortSignal(options.signal);
-
-    const { data: profileRows, error: profileError } = await profileQuery;
-    if (profileError) {
+    const { data, error } = await query;
+    if (error) {
       if (
-        profileError.code === "PGRST205" ||
-        profileError.message.includes("schema cache") ||
-        profileError.message.includes("Could not find the table")
+        error.code === "PGRST202" ||
+        error.code === "PGRST205" ||
+        error.message.includes("schema cache") ||
+        error.message.includes("Could not find the function")
       ) {
         return null;
       }
-      throw new Error(`Failed to get complete profile: ${profileError.message}`);
+      throw new Error(`Failed to get complete profile: ${error.message}`);
     }
 
-    if (!profileRows || profileRows.length === 0) return null;
+    if (!Array.isArray(data) || data.length === 0) return null;
 
-    const row = profileRows[0];
-    const version = row.version;
-
-    const diffQuery = this.client
-      .from("company_diffs")
-      .select("data")
-      .eq("company_id", companyId)
-      .eq("to_version", version);
-
-    if (options?.signal) diffQuery.abortSignal(options.signal);
-
-    const { data: diffRow, error: diffError } = await diffQuery.maybeSingle();
-    if (diffError) {
-      if (
-        diffError.code === "PGRST205" ||
-        diffError.message.includes("schema cache") ||
-        diffError.message.includes("Could not find the table")
-      ) {
-        // Fallback without diff
-      } else {
-        throw new Error(`Failed to get snapshot diff: ${diffError.message}`);
-      }
-    }
-
+    const row = data[0] as {
+      profile_data: unknown;
+      analysis_report: unknown;
+      diff_data: unknown;
+      updated_at: string | Date;
+    };
     const rawSnapshot = {
-      profile: row.data,
+      profile: row.profile_data,
       report: row.analysis_report,
-      diff: diffRow ? diffRow.data : null,
+      diff: row.diff_data,
       lastSyncedAt: typeof row.updated_at === "string" ? row.updated_at : new Date(row.updated_at).toISOString(),
     };
 
@@ -289,11 +282,13 @@ export class SupabaseStorageAdapter implements StorageAdapter {
   }
 
   async resolveOrCreateIdentity(
+    context: StorageContext,
     identity: NormalizedCompanyIdentity,
     candidateId: string,
     options?: StorageWriteOptions,
   ): Promise<string> {
-    const query = this.client.rpc("resolve_company_identity", {
+    const query = this.client.rpc("resolve_company_identity_v2", {
+      p_tenant_id: context.tenantId,
       p_tax_id: identity.taxId,
       p_domain: identity.domain,
       p_name: identity.name,
@@ -313,7 +308,7 @@ export class SupabaseStorageAdapter implements StorageAdapter {
         error.message.includes("Could not find the function")
       ) {
         console.warn(
-          "Supabase stored procedure resolve_company_identity not found. Using candidate ID."
+          "Supabase stored procedure resolve_company_identity_v2 not found. Using candidate ID."
         );
         return candidateId;
       }
@@ -324,16 +319,19 @@ export class SupabaseStorageAdapter implements StorageAdapter {
   }
 
   async persistResearchSnapshot(
+    context: StorageContext,
     identity: NormalizedCompanyIdentity,
     snapshot: Omit<ResearchSnapshot, "lastSyncedAt">,
     options?: StorageWriteOptions,
   ): Promise<ResearchSnapshot> {
-    const query = this.client.rpc("persist_research_snapshot", {
+    const query = this.client.rpc("persist_research_snapshot_v2", {
+      p_tenant_id: context.tenantId,
       p_company_id: snapshot.profile.id,
       p_tax_id: identity.taxId,
       p_domain: identity.domain,
       p_name: identity.name,
       p_version: snapshot.profile.version,
+      p_expected_version: Math.max(0, snapshot.profile.version - 1),
       p_profile_data: snapshot.profile,
       p_analysis_report: snapshot.report,
       p_diff_data: snapshot.diff,
@@ -345,6 +343,9 @@ export class SupabaseStorageAdapter implements StorageAdapter {
       if (error.message.includes("identity_conflict")) {
         throw new IdentityConflictError();
       }
+      if (error.message.includes("version_conflict")) {
+        throw new Error("version_conflict");
+      }
       if (
         error.code === "PGRST202" ||
         error.code === "PGRST205" ||
@@ -352,7 +353,7 @@ export class SupabaseStorageAdapter implements StorageAdapter {
         error.message.includes("Could not find the function")
       ) {
         console.warn(
-          "Supabase stored procedure persist_research_snapshot not found. Skipping persistence."
+          "Supabase stored procedure persist_research_snapshot_v2 not found. Skipping persistence."
         );
         return {
           profile: snapshot.profile,

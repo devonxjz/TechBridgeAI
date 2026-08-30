@@ -6,6 +6,8 @@ import { ResearchProgress } from "./components/research-progress";
 import { ProfileCard } from "./components/profile-card";
 import { CacheSuggestions } from "./components/cache-suggestions";
 import { useResearch } from "./hooks/use-research";
+import { getResearchRequestContext } from "./lib/research-request-context";
+import { AuthControls } from "./components/auth-controls";
 
 export default function HomePage() {
   const {
@@ -15,7 +17,7 @@ export default function HomePage() {
     refreshResearch,
     bypassAndResearch,
     reset,
-  } = useResearch();
+  } = useResearch(getResearchRequestContext);
 
   const isLoading =
     state.status === "researching" || state.status === "building";
@@ -41,15 +43,18 @@ export default function HomePage() {
             </div>
           </div>
 
-          {state.status !== "idle" && (
-            <button
-              onClick={reset}
-              className="text-xs text-muted hover:text-foreground transition-colors
-                         px-3 py-1.5 rounded-lg hover:bg-surface"
-            >
-              ← Nghiên cứu mới
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            <AuthControls />
+            {state.status !== "idle" && (
+              <button
+                onClick={reset}
+                className="text-xs text-muted hover:text-foreground transition-colors
+                           px-3 py-1.5 rounded-lg hover:bg-surface"
+              >
+                ← Nghiên cứu mới
+              </button>
+            )}
+          </div>
         </div>
       </header>
 

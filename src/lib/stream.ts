@@ -12,7 +12,7 @@ export interface SSEWriter {
 /**
  * Create a ReadableStream that accepts StreamEvents and encodes them as SSE.
  */
-export function createSSEStream(): {
+export function createSSEStream(options?: { onCancel?: () => void }): {
   stream: ReadableStream<Uint8Array>;
   writer: SSEWriter;
 } {
@@ -26,6 +26,7 @@ export function createSSEStream(): {
     },
     cancel() {
       isClosed = true;
+      options?.onCancel?.();
     },
   });
 

@@ -11,6 +11,13 @@
     "test:db": "vitest run tests/integration/supabase-cache-concurrency.test.ts",
     "typecheck": "next typegen && tsc --noEmit",
     "typecheck:legacy": "next typegen && tsc6 --noEmit",
+    "worker:test": "npm --prefix workers/research-gateway test",
+    "worker:typecheck": "npm --prefix workers/research-gateway run typecheck",
+    "worker:types:check": "npm --prefix workers/research-gateway run types:check",
+    "worker:dry-run": "npm --prefix workers/research-gateway run deploy:dry-run -- --env staging && npm --prefix workers/research-gateway run deploy:dry-run -- --env production",
+    "worker:startup": "npm --prefix workers/research-gateway run check:startup -- --env staging && rm -f workers/research-gateway/worker-startup.cpuprofile && npm --prefix workers/research-gateway run check:startup -- --env production && rm -f workers/research-gateway/worker-startup.cpuprofile",
+    "worker:check": "npm run worker:typecheck && npm run worker:test && npm run worker:types:check && npm run worker:dry-run && npm run worker:startup",
+    "smoke:gateway": "node scripts/smoke-research-gateway.mjs",
     "postinstall": "node -e \"const fs=require('fs'),p='node_modules/typescript/package.json';if(fs.existsSync(p)){const j=JSON.parse(fs.readFileSync(p,'utf8'));if(!j.bin||!j.bin.tsc){j.bin=j.bin||{};j.bin.tsc='./bin/tsc';fs.writeFileSync(p,JSON.stringify(j,null,2));const b='node_modules/typescript/bin/tsc';if(!fs.existsSync(b)){fs.writeFileSync(b,'#!/usr/bin/env node\\nrequire(\\'../../@typescript/native/bin/tsc\\');\\n',{mode:0o755});}}}\""
   },
   "dependencies": {

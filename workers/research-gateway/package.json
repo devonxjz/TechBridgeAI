@@ -1,0 +1,26 @@
+{
+  "name": "@techbridgeai/research-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.6.0",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "types": "wrangler types worker-configuration.d.ts --strict-vars=false",
+    "types:check": "wrangler types --check worker-configuration.d.ts --strict-vars=false",
+    "deploy:dry-run": "wrangler deploy --dry-run",
+    "check:startup": "wrangler check startup",
+    "worker:check": "npm run types:check && npm run typecheck && npm test && npm run deploy:dry-run -- --env staging && npm run deploy:dry-run -- --env production && npm run check:startup",
+    "predeploy": "tsx scripts/deploy-guard.ts"
+  },
+  "dependencies": {
+    "jose": "4.15.9"
+  },
+  "devDependencies": {
+    "tsx": "4.20.6",
+    "typescript": "6.0.2",
+    "vitest": "4.1.11",
+    "wrangler": "4.127.1"
+  }
+}

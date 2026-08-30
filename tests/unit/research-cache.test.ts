@@ -207,6 +207,8 @@ describe("Research Cache - Decision Logic", () => {
 });
 
 describe("ResearchCache - Storage-backed Cache Module", () => {
+  const TEST_TENANT_ID = "tenant-test";
+  const TEST_STORAGE_CONTEXT = { tenantId: TEST_TENANT_ID, userId: "user-test" };
   let storage: MemoryStorageAdapter;
   let cache: ResearchCache;
 
@@ -246,15 +248,17 @@ describe("ResearchCache - Storage-backed Cache Module", () => {
 
   it("resolves tax-ID match to an immediate hit with complete snapshot", async () => {
     await storage.resolveOrCreateIdentity(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       "company-a"
     );
     await storage.persistResearchSnapshot(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       { profile: validProfile, report: validReport, diff: null }
     );
 
-    const resolution = await cache.lookup({ name: "FPT", taxId: "0101248141" });
+    const resolution = await cache.lookup(TEST_STORAGE_CONTEXT, { name: "FPT", taxId: "0101248141" });
     expect(resolution).toMatchObject({
       kind: "hit",
       matchedBy: "tax_id",
@@ -264,15 +268,17 @@ describe("ResearchCache - Storage-backed Cache Module", () => {
 
   it("returns suggestions for name matches", async () => {
     await storage.resolveOrCreateIdentity(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       "company-a"
     );
     await storage.persistResearchSnapshot(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       { profile: validProfile, report: validReport, diff: null }
     );
 
-    const resolution = await cache.lookup({ name: "Công ty CP FPT" });
+    const resolution = await cache.lookup(TEST_STORAGE_CONTEXT, { name: "Công ty CP FPT" });
     expect(resolution).toMatchObject({
       kind: "suggestions",
       suggestions: [
@@ -285,7 +291,7 @@ describe("ResearchCache - Storage-backed Cache Module", () => {
   });
 
   it("returns miss for unknown companies", async () => {
-    const resolution = await cache.lookup({ name: "Unknown Company" });
+    const resolution = await cache.lookup(TEST_STORAGE_CONTEXT, { name: "Unknown Company" });
     expect(resolution).toEqual({
       kind: "miss",
       identity: { taxId: null, domain: null, name: "unknown company" },
@@ -293,13 +299,57 @@ describe("ResearchCache - Storage-backed Cache Module", () => {
     });
   });
 
+  it("supports legacy memory snapshot persistence without exposing it to tenant-aware reads", async () => {
+    const identity = {
+      taxId: "0101248141",
+      domain: "fpt.com.vn",
+      name: "công ty cp fpt",
+    };
+    await storage.persistResearchSnapshot(identity, {
+      profile: validProfile,
+      report: validReport,
+      diff: null,
+    });
+
+    expect(storage.getProfileCount()).toBe(1);
+    await expect(storage.getLatestCompleteSnapshot(TEST_STORAGE_CONTEXT, "company-a"))
+      .resolves.toBeNull();
+  });
+
+  it("never returns another tenant's cached identity or snapshot", async () => {
+    const identity = {
+      taxId: "0101248141",
+      domain: "fpt.com.vn",
+      name: "công ty cp fpt",
+    };
+    await storage.resolveOrCreateIdentity(TEST_STORAGE_CONTEXT, identity, "company-a");
+    await storage.persistResearchSnapshot(TEST_STORAGE_CONTEXT, identity, {
+      profile: validProfile,
+      report: validReport,
+      diff: null,
+    });
+
+    await expect(storage.getLatestCompleteSnapshot({ tenantId: "tenant-other", userId: "user-other" }, "company-a"))
+      .resolves.toBeNull();
+    await expect(storage.findIdentityCandidates({ tenantId: "tenant-other", userId: "user-other" }, identity))
+      .resolves.toEqual([]);
+    await expect(cache.lookup({ tenantId: "tenant-other", userId: "user-other" }, { name: "FPT", taxId: "0101248141" }))
+      .resolves.toEqual({
+        kind: "miss",
+        identity: { taxId: "0101248141", domain: null, name: "fpt" },
+        cacheInvalid: false,
+      });
+  });
+
   it("rejects select when requested companyId is not in the suggestion candidate set", async () => {
     // Seed company-a and company-b
     await storage.resolveOrCreateIdentity(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       "company-a"
     );
     await storage.persistResearchSnapshot(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       { profile: validProfile, report: validReport, diff: null }
     );
@@ -307,48 +357,55 @@ describe("ResearchCache - Storage-backed Cache Module", () => {
     const profileB = { ...validProfile, id: "company-b", officialName: "Vingroup" };
     const reportB = { ...validReport, companyId: "company-b" };
     await storage.resolveOrCreateIdentity(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101245486", domain: "vingroup.net", name: "tập đoàn vingroup" },
       "company-b"
     );
     await storage.persistResearchSnapshot(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101245486", domain: "vingroup.net", name: "tập đoàn vingroup" },
       { profile: profileB, report: reportB, diff: null }
     );
 
     await expect(
-      cache.select({ name: "Công ty CP FPT" }, "company-b")
+      cache.select(TEST_STORAGE_CONTEXT, { name: "Công ty CP FPT" }, "company-b")
     ).rejects.toMatchObject({ code: "invalid_cache_selection" });
   });
 
   it("rejects prepareRefresh when strong keys conflict with target company", async () => {
     await storage.resolveOrCreateIdentity(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       "company-a"
     );
     await storage.persistResearchSnapshot(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       { profile: validProfile, report: validReport, diff: null }
     );
 
     await storage.resolveOrCreateIdentity(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101245486", domain: "vingroup.net", name: "tập đoàn vingroup" },
       "company-b"
     );
     const profileB = { ...validProfile, id: "company-b", officialName: "Vingroup" };
     const reportB = { ...validReport, companyId: "company-b" };
     await storage.persistResearchSnapshot(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101245486", domain: "vingroup.net", name: "tập đoàn vingroup" },
       { profile: profileB, report: reportB, diff: null }
     );
 
     // Refreshing company-b with company-a's tax ID must reject with identity_conflict
     await expect(
-      cache.prepareRefresh({ name: "Vingroup", taxId: "0101248141" }, "company-b")
+      cache.prepareRefresh(TEST_STORAGE_CONTEXT, { name: "Vingroup", taxId: "0101248141" }, "company-b")
     ).rejects.toMatchObject({ code: "identity_conflict" });
   });
 
   it("recovers from corrupt snapshot by returning miss with cacheInvalid: true", async () => {
     await storage.resolveOrCreateIdentity(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       "company-a"
     );
@@ -359,7 +416,7 @@ describe("ResearchCache - Storage-backed Cache Module", () => {
       new CacheInvalidError("Corrupted data")
     );
 
-    const resolution = await cache.lookup({ name: "FPT", taxId: "0101248141" });
+    const resolution = await cache.lookup(TEST_STORAGE_CONTEXT, { name: "FPT", taxId: "0101248141" });
     expect(resolution).toEqual({
       kind: "miss",
       identity: { taxId: "0101248141", domain: null, name: "fpt" },
@@ -410,8 +467,8 @@ describe("ResearchCache - Storage-backed Cache Module", () => {
       ],
     };
 
-    await storage.resolveOrCreateIdentity(identity, "fpt-corp");
-    const persisted = await cache.persist(identity, {
+    await storage.resolveOrCreateIdentity(TEST_STORAGE_CONTEXT, identity, "fpt-corp");
+    const persisted = await cache.persist(TEST_STORAGE_CONTEXT, identity, {
       profile: richProfile,
       report: validReport,
       diff: null,

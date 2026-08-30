@@ -62,6 +62,32 @@ export function buildResearchRequest(
   return cache ? { input, cache } : { input };
 }
 
+export interface ResearchRequestContext {
+  accessToken: string;
+  tenantId?: string;
+}
+
+export type GetResearchRequestContext = () =>
+  | ResearchRequestContext
+  | Promise<ResearchRequestContext>;
+
+export function buildResearchHeaders(
+  context: ResearchRequestContext,
+  idempotencyKey: string
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${context.accessToken}`,
+    "Idempotency-Key": idempotencyKey,
+  };
+
+  if (context.tenantId) {
+    headers["x-tenant-id"] = context.tenantId;
+  }
+
+  return headers;
+}
+
 export function reduceResearchEvent(
   state: ResearchState,
   event: StreamEvent
@@ -172,29 +198,56 @@ export function reduceResearchEvent(
   }
 }
 
-export function useResearch() {
+export interface ResearchOperation {
+  input: CompanyInput;
+  cache?: ResearchRequest["cache"];
+  idempotencyKey: string;
+}
+
+export function createResearchOperation(
+  input: CompanyInput,
+  cache?: ResearchRequest["cache"],
+  createId = () => crypto.randomUUID()
+): ResearchOperation {
+  return { input, cache, idempotencyKey: createId() };
+}
+
+export function retryResearchOperation(
+  operation: ResearchOperation
+): ResearchOperation {
+  return operation;
+}
+
+export function useResearch(getRequestContext: GetResearchRequestContext) {
   const [state, setState] = useState<ResearchState>(INITIAL_STATE);
   const abortRef = useRef<AbortController | null>(null);
+  const operationRef = useRef<ResearchOperation | null>(null);
 
-  const research = useCallback(
-    async (input: CompanyInput, cache?: ResearchRequest["cache"]) => {
+  const runOperation = useCallback(
+    async (operation: ResearchOperation) => {
       // Abort previous research
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
+      operationRef.current = operation;
 
       setState({
         ...INITIAL_STATE,
-        input,
+        input: operation.input,
         status: "researching",
       });
 
       try {
-        const payload = buildResearchRequest(input, cache);
+        const context = await getRequestContext();
+        if (!context.accessToken) {
+          throw new Error("Supabase session is required");
+        }
+
+        const payload = buildResearchRequest(operation.input, operation.cache);
 
         const response = await fetch("/api/research", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: buildResearchHeaders(context, operation.idempotencyKey),
           body: JSON.stringify(payload),
           signal: controller.signal,
         });
@@ -255,8 +308,19 @@ export function useResearch() {
         }));
       }
     },
-    []
+    [getRequestContext]
   );
+
+  const research = useCallback(
+    (input: CompanyInput, cache?: ResearchRequest["cache"]) =>
+      runOperation(createResearchOperation(input, cache)),
+    [runOperation]
+  );
+
+  const retry = useCallback(() => {
+    if (!operationRef.current) return;
+    void runOperation(retryResearchOperation(operationRef.current));
+  }, [runOperation]);
 
   const selectSuggestion = useCallback(
     (companyId: string) => {
@@ -281,6 +345,7 @@ export function useResearch() {
 
   const reset = useCallback(() => {
     abortRef.current?.abort();
+    operationRef.current = null;
     setState(INITIAL_STATE);
   }, []);
 
@@ -293,6 +358,7 @@ export function useResearch() {
   return {
     state,
     research,
+    retry,
     selectSuggestion,
     refreshResearch,
     bypassAndResearch,

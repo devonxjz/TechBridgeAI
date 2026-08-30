@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterAll, beforeAll } from "vitest";
 import { vi } from "vitest";
 
 import {
@@ -7,6 +7,16 @@ import {
   MockScraperAdapter,
 } from "../helpers/mock-adapters";
 
+const TEST_TENANT_ID = "00000000-0000-4000-8000-000000000001";
+const TEST_STORAGE_CONTEXT = { tenantId: TEST_TENANT_ID, userId: "user-test" };
+const TEST_USER_ID = "00000000-0000-4000-8000-000000000002";
+const TEST_KEY_ID = "workflow-e2e-key";
+const TEST_SECRET = "workflow-e2e-deterministic-signing-secret-32-bytes";
+const ORIGINAL_GATEWAY_ENV = {
+  keyId: process.env.GATEWAY_SIGNING_KEY_CURRENT_ID,
+  secret: process.env.GATEWAY_SIGNING_KEY_CURRENT,
+};
+let requestSequence = 0;
 let llm: MockLLMAdapter;
 let search: MockSearchAdapter;
 let scraper: MockScraperAdapter;
@@ -25,13 +35,56 @@ import { POST } from "@/app/api/research/route";
 import { NextRequest } from "next/server";
 import { createStorageAdapter, resetAdapters } from "@/config";
 import { MemoryStorageAdapter } from "@/adapters/storage/memory";
+import { signInternalGatewayRequest } from "@/lib/internal-gateway-signing";
+
+async function signedRequest(
+  payload: unknown,
+  signal?: AbortSignal,
+): Promise<NextRequest> {
+  const body = JSON.stringify(payload);
+  const bodyBytes = new TextEncoder().encode(body);
+  requestSequence += 1;
+  const signedHeaders = await signInternalGatewayRequest({
+    keyId: TEST_KEY_ID,
+    secret: TEST_SECRET,
+    method: "POST",
+    pathname: "/api/research",
+    body: bodyBytes,
+    timestamp: Math.floor(Date.now() / 1000),
+    requestId: `00000000-0000-4000-8000-${String(requestSequence).padStart(12, "0")}`,
+    tenantId: TEST_TENANT_ID,
+    userId: TEST_USER_ID,
+  });
+  signedHeaders.set("Content-Type", "application/json");
+  return new NextRequest("http://localhost:3000/api/research", {
+    method: "POST",
+    headers: signedHeaders,
+    body,
+    signal,
+  });
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
 
 describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
+  beforeAll(() => {
+    process.env.GATEWAY_SIGNING_KEY_CURRENT_ID = TEST_KEY_ID;
+    process.env.GATEWAY_SIGNING_KEY_CURRENT = TEST_SECRET;
+  });
+
+  afterAll(() => {
+    restoreEnv("GATEWAY_SIGNING_KEY_CURRENT_ID", ORIGINAL_GATEWAY_ENV.keyId);
+    restoreEnv("GATEWAY_SIGNING_KEY_CURRENT", ORIGINAL_GATEWAY_ENV.secret);
+  });
   beforeEach(() => {
     llm = new MockLLMAdapter();
     search = new MockSearchAdapter();
     scraper = new MockScraperAdapter();
     process.env.STORAGE_PROVIDER = "memory";
+    requestSequence = 0;
     resetAdapters();
   });
 
@@ -80,15 +133,11 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
     llm.setResponse("Phân tích và đánh giá", JSON.stringify(mockAnalysisData));
 
     // 2. Execute First API Request (Initial Miss -> Live Workflow -> Version 1 persisted)
-    const req1 = new NextRequest("http://localhost:3000/api/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        input: {
-          name: "Vingroup",
-          website: "https://vingroup.net",
-        },
-      }),
+    const req1 = await signedRequest({
+      input: {
+        name: "Vingroup",
+        website: "https://vingroup.net",
+      },
     });
 
     const response1 = await POST(req1);
@@ -104,7 +153,7 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
     expect(text1).toContain("event: done");
 
     // Find persisted company ID
-    const candidates = await storage.findIdentityCandidates({
+    const candidates = await storage.findIdentityCandidates(TEST_STORAGE_CONTEXT, {
       taxId: null,
       domain: "vingroup.net",
       name: "vingroup",
@@ -112,7 +161,7 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
     expect(candidates.length).toBe(1);
     const companyId = candidates[0].companyId;
 
-    const savedV1 = await storage.getLatestCompleteSnapshot(companyId);
+    const savedV1 = await storage.getLatestCompleteSnapshot(TEST_STORAGE_CONTEXT, companyId);
     expect(savedV1).not.toBeNull();
     expect(savedV1?.profile.version).toBe(1);
     expect(savedV1?.profile.officialName).toBe("Tập đoàn Vingroup");
@@ -126,19 +175,15 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
     };
     llm.setResponse("Tổng hợp thông tin", JSON.stringify(v2MockProfile));
 
-    const req2 = new NextRequest("http://localhost:3000/api/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        input: {
-          name: "Vingroup",
-          website: "https://vingroup.net",
-        },
-        cache: {
-          action: "refresh",
-          companyId,
-        },
-      }),
+    const req2 = await signedRequest({
+      input: {
+        name: "Vingroup",
+        website: "https://vingroup.net",
+      },
+      cache: {
+        action: "refresh",
+        companyId,
+      },
     });
 
     const response2 = await POST(req2);
@@ -149,26 +194,22 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
     expect(text2).toContain("event: done");
 
     // Verify version 2 and diff persistence
-    const savedV2 = await storage.getLatestCompleteSnapshot(companyId);
+    const savedV2 = await storage.getLatestCompleteSnapshot(TEST_STORAGE_CONTEXT, companyId);
     expect(savedV2?.profile.version).toBe(2);
     expect(savedV2?.profile.markets).toContain("Mỹ");
 
-    const diffs = await storage.getDiffs(companyId);
+    const diffs = await storage.getDiffs(TEST_STORAGE_CONTEXT, companyId);
     expect(diffs.length).toBe(1);
     expect(diffs[0].fromVersion).toBe(1);
     expect(diffs[0].toVersion).toBe(2);
     expect(diffs[0].changes.some((c) => c.field === "markets")).toBe(true);
 
     // 4. Execute Third API Request (Cache Hit - returns cached snapshot immediately)
-    const req3 = new NextRequest("http://localhost:3000/api/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        input: {
-          name: "Vingroup",
-          website: "https://vingroup.net",
-        },
-      }),
+    const req3 = await signedRequest({
+      input: {
+        name: "Vingroup",
+        website: "https://vingroup.net",
+      },
     });
 
     const response3 = await POST(req3);
@@ -180,14 +221,10 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
   });
 
   it("rejects invalid request inputs with HTTP 400", async () => {
-    const invalidReq = new NextRequest("http://localhost:3000/api/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        input: {
-          name: "", // empty name
-        },
-      }),
+    const invalidReq = await signedRequest({
+      input: {
+        name: "", // empty name
+      },
     });
 
     const response = await POST(invalidReq);
@@ -205,12 +242,8 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
     };
 
     const response = await POST(
-      new NextRequest("http://localhost:3000/api/research", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          input: { name: "EDUZ", website: "https://eduz.vn" },
-        }),
+      await signedRequest({
+        input: { name: "EDUZ", website: "https://eduz.vn" },
       }),
     );
 
@@ -240,14 +273,12 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
       return { url: "https://fpt.com.vn", title: "FPT", text: "FPT Content" };
     };
 
-    const req = new NextRequest("http://localhost:3000/api/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const req = await signedRequest(
+      {
         input: { name: "FPT", website: "https://fpt.com.vn" },
-      }),
-      signal: controller.signal,
-    });
+      },
+      controller.signal,
+    );
 
     const response = await POST(req);
     expect(response.status).toBe(200);
@@ -261,13 +292,13 @@ describe("E2E Workflow Tests - PartnerIQ Research Pipeline", () => {
     expect(text).toContain("event: research:start");
 
     // Profile / snapshot should not have been saved
-    const candidates = await storage.findIdentityCandidates({
+    const candidates = await storage.findIdentityCandidates(TEST_STORAGE_CONTEXT, {
       taxId: null,
       domain: "fpt.com.vn",
       name: "fpt",
     });
     if (candidates.length > 0) {
-      const snapshot = await storage.getLatestCompleteSnapshot(candidates[0].companyId);
+      const snapshot = await storage.getLatestCompleteSnapshot(TEST_STORAGE_CONTEXT, candidates[0].companyId);
       expect(snapshot).toBeNull();
     }
   });

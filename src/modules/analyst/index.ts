@@ -39,16 +39,29 @@ export const DEFAULT_CRITERIA_WEIGHTS: Record<string, number> = {
   "Recent Activity": 0.2,
 };
 
+const CRITERION_NAMES = [
+  "Industry Alignment",
+  "Company Size Match",
+  "Geographic Relevance",
+  "Digital Maturity",
+  "Recent Activity",
+] as const;
+
 const LLMAnalysisSchema = z.object({
   executiveSummary: z.string(),
   criteria: z.array(
     z.object({
-      name: z.string(),
+      name: z.enum(CRITERION_NAMES),
       score: z.number().min(0).max(100),
       reasoning: z.string(),
       evidence: LLMClaimEvidenceSchema.nullable().default(null),
     })
-  ),
+  ).length(CRITERION_NAMES.length).superRefine((criteria, ctx) => {
+    const names = new Set(criteria.map((criterion) => criterion.name));
+    if (names.size !== criteria.length) {
+      ctx.addIssue({ code: "custom", message: "Each analysis criterion must be unique" });
+    }
+  }),
   riskFlags: z
     .array(
       z.object({

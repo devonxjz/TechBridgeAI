@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { NextRequest } from "next/server";
 import { POST } from "@/app/api/research/route";
 import { MemoryStorageAdapter } from "@/adapters/storage/memory";
 import { CacheInvalidError } from "@/modules/cache";
 import type { CompanyProfile, AnalysisReport } from "@/lib/types";
-
+import {
+  configureTestGatewayKeys,
+  createSignedResearchRequest,
+  TEST_STORAGE_CONTEXT,
+} from "@/../tests/helpers/signed-research-request";
 const mockLLM = vi.fn();
 const mockSearch = vi.fn();
 const mockScraper = vi.fn();
@@ -113,28 +116,27 @@ describe("API Route - /api/research Cache Read-Through", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     storage = new MemoryStorageAdapter();
+    configureTestGatewayKeys();
   });
 
   it("returns cache:hit and final events without calling search/LLM providers on exact tax-ID match", async () => {
     await storage.resolveOrCreateIdentity(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       "comp-fpt"
     );
     await storage.persistResearchSnapshot(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       { profile: dummyProfile, report: dummyReport, diff: null }
     );
 
-    const req = new NextRequest("http://localhost:3000/api/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const req = await createSignedResearchRequest({
         input: {
           name: "FPT",
           taxId: "0101248141",
         },
-      }),
-    });
+      });
 
     const response = await POST(req);
     const body = await response.text();
@@ -149,23 +151,21 @@ describe("API Route - /api/research Cache Read-Through", () => {
 
   it("returns cache:suggestions on ambiguous name matches", async () => {
     await storage.resolveOrCreateIdentity(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       "comp-fpt"
     );
     await storage.persistResearchSnapshot(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       { profile: dummyProfile, report: dummyReport, diff: null }
     );
 
-    const req = new NextRequest("http://localhost:3000/api/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const req = await createSignedResearchRequest({
         input: {
           name: "Công ty CP FPT",
         },
-      }),
-    });
+      });
 
     const response = await POST(req);
     const body = await response.text();
@@ -178,25 +178,23 @@ describe("API Route - /api/research Cache Read-Through", () => {
 
   it("returns identity_conflict error on conflicting tax-ID and domain input", async () => {
     await storage.resolveOrCreateIdentity(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       "comp-fpt"
     );
     await storage.resolveOrCreateIdentity(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101245486", domain: "vingroup.net", name: "tập đoàn vingroup" },
       "comp-vin"
     );
 
-    const req = new NextRequest("http://localhost:3000/api/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const req = await createSignedResearchRequest({
         input: {
           name: "Conflicting Corp",
           taxId: "0101248141",
           website: "https://vingroup.net",
         },
-      }),
-    });
+      });
 
     const response = await POST(req);
     expect(response.status).toBe(409);
@@ -206,18 +204,17 @@ describe("API Route - /api/research Cache Read-Through", () => {
 
   it("resolves cache selection when action is select", async () => {
     await storage.resolveOrCreateIdentity(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       "comp-fpt"
     );
     await storage.persistResearchSnapshot(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       { profile: dummyProfile, report: dummyReport, diff: null }
     );
 
-    const req = new NextRequest("http://localhost:3000/api/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const req = await createSignedResearchRequest({
         input: {
           name: "Công ty CP FPT",
         },
@@ -225,8 +222,7 @@ describe("API Route - /api/research Cache Read-Through", () => {
           action: "select",
           companyId: "comp-fpt",
         },
-      }),
-    });
+      });
 
     const response = await POST(req);
     const body = await response.text();
@@ -239,14 +235,12 @@ describe("API Route - /api/research Cache Read-Through", () => {
 
   it("returns invalid_cache_selection error on invalid selectedCompanyId", async () => {
     await storage.resolveOrCreateIdentity(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       "comp-fpt"
     );
 
-    const req = new NextRequest("http://localhost:3000/api/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const req = await createSignedResearchRequest({
         input: {
           name: "Công ty CP FPT",
         },
@@ -254,8 +248,7 @@ describe("API Route - /api/research Cache Read-Through", () => {
           action: "select",
           companyId: "unrelated-uuid",
         },
-      }),
-    });
+      });
 
     const response = await POST(req);
     expect(response.status).toBe(400);
@@ -265,18 +258,17 @@ describe("API Route - /api/research Cache Read-Through", () => {
 
   it("bypasses cache when action is bypass", async () => {
     await storage.resolveOrCreateIdentity(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       "comp-fpt"
     );
     await storage.persistResearchSnapshot(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       { profile: dummyProfile, report: dummyReport, diff: null }
     );
 
-    const req = new NextRequest("http://localhost:3000/api/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const req = await createSignedResearchRequest({
         input: {
           name: "FPT",
           taxId: "0101248141",
@@ -284,8 +276,7 @@ describe("API Route - /api/research Cache Read-Through", () => {
         cache: {
           action: "bypass",
         },
-      }),
-    });
+      });
 
     const response = await POST(req);
     const body = await response.text();
@@ -295,10 +286,8 @@ describe("API Route - /api/research Cache Read-Through", () => {
   });
 
   it("returns HTTP 400 when request body has invalid JSON", async () => {
-    const req = new NextRequest("http://localhost:3000/api/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: "invalid-json",
+    const req = await createSignedResearchRequest(null, {
+      rawBody: "invalid-json",
     });
 
     const response = await POST(req);
@@ -308,15 +297,11 @@ describe("API Route - /api/research Cache Read-Through", () => {
   });
 
   it("returns HTTP 400 when input validation fails", async () => {
-    const req = new NextRequest("http://localhost:3000/api/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const req = await createSignedResearchRequest({
         input: {
           name: "",
         },
-      }),
-    });
+      });
 
     const response = await POST(req);
     expect(response.status).toBe(400);
@@ -325,10 +310,7 @@ describe("API Route - /api/research Cache Read-Through", () => {
   });
 
   it("returns identity_conflict on invalid refresh company ID", async () => {
-    const req = new NextRequest("http://localhost:3000/api/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const req = await createSignedResearchRequest({
         input: {
           name: "Vingroup",
         },
@@ -336,8 +318,7 @@ describe("API Route - /api/research Cache Read-Through", () => {
           action: "refresh",
           companyId: "nonexistent-id",
         },
-      }),
-    });
+      });
 
     const response = await POST(req);
     expect(response.status).toBe(409);
@@ -347,6 +328,7 @@ describe("API Route - /api/research Cache Read-Through", () => {
 
   it("emits non-terminal cache_invalid notice and proceeds to live workflow on corrupt snapshot", async () => {
     await storage.resolveOrCreateIdentity(
+      TEST_STORAGE_CONTEXT,
       { taxId: "0101248141", domain: "fpt.com.vn", name: "công ty cp fpt" },
       "comp-fpt"
     );
@@ -354,16 +336,12 @@ describe("API Route - /api/research Cache Read-Through", () => {
       new CacheInvalidError("Corrupted JSONB")
     );
 
-    const req = new NextRequest("http://localhost:3000/api/research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const req = await createSignedResearchRequest({
         input: {
           name: "Công ty CP FPT",
           taxId: "0101248141",
         },
-      }),
-    });
+      });
 
     const response = await POST(req);
     expect(response.status).toBe(200);

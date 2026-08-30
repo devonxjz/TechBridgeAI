@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   reduceResearchEvent,
   buildResearchRequest,
+  buildResearchHeaders,
+  createResearchOperation,
+  retryResearchOperation,
   INITIAL_STATE,
   type ResearchState,
 } from "@/app/hooks/use-research";
@@ -18,6 +21,39 @@ describe("useResearch request builder - buildResearchRequest", () => {
       .toEqual({ input, cache: { action: "bypass" } });
     expect(buildResearchRequest(input, { action: "refresh", companyId: "fpt" }))
       .toEqual({ input, cache: { action: "refresh", companyId: "fpt" } });
+  });
+});
+
+describe("useResearch logical operation identity", () => {
+  it("creates one idempotency key per logical operation and preserves it for retry", () => {
+    const first = createResearchOperation({ name: "FPT" }, undefined, () => "request-1");
+    const second = createResearchOperation({ name: "FPT" }, undefined, () => "request-2");
+
+    expect(first.idempotencyKey).toBe("request-1");
+    expect(second.idempotencyKey).toBe("request-2");
+    expect(retryResearchOperation(first).idempotencyKey).toBe("request-1");
+  });
+});
+
+describe("useResearch gateway request headers - buildResearchHeaders", () => {
+  it("sends Supabase bearer auth and the logical operation idempotency key", () => {
+    expect(buildResearchHeaders(
+      { accessToken: "supabase-access-token" },
+      "9c6f75f1-e606-4d76-8c2d-bf51f98ca2c4"
+    )).toEqual({
+      "Content-Type": "application/json",
+      Authorization: "Bearer supabase-access-token",
+      "Idempotency-Key": "9c6f75f1-e606-4d76-8c2d-bf51f98ca2c4",
+    });
+  });
+
+  it("includes a selected tenant only as the gateway hint header", () => {
+    const headers = buildResearchHeaders(
+      { accessToken: "supabase-access-token", tenantId: "tenant-a" },
+      "9c6f75f1-e606-4d76-8c2d-bf51f98ca2c4"
+    );
+
+    expect(headers["x-tenant-id"]).toBe("tenant-a");
   });
 });
 

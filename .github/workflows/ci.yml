@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   checks:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -24,6 +25,24 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Detect research gateway Worker
+        id: worker
+        shell: bash
+        run: |
+          if [[ -f workers/research-gateway/package.json ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Worker dependencies
+        if: steps.worker.outputs.enabled == 'true'
+        run: npm ci --prefix workers/research-gateway
+
+      - name: Check Worker
+        if: steps.worker.outputs.enabled == 'true'
+        run: npm run worker:check
 
       - name: Type check
         run: npm run typecheck
@@ -39,7 +58,10 @@ jobs:
           npx supabase start
           eval "$(npx supabase status -o env)"
           SUPABASE_TEST_URL="$API_URL" SUPABASE_TEST_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" SUPABASE_TEST_ANON_KEY="$ANON_KEY" npm run test:db
-          npx supabase stop --no-backup
+
+      - name: Stop Supabase
+        if: always()
+        run: npx supabase stop --no-backup
 
       - name: Build
         run: npm run build

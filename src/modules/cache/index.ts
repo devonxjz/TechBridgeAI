@@ -5,6 +5,7 @@ import type {
 } from "@/lib/types";
 import type {
   StorageAdapter,
+  StorageContext,
   StorageReadOptions,
   StorageWriteOptions,
 } from "@/adapters/storage/types";
@@ -49,22 +50,30 @@ export type CacheResolution =
     };
 
 export interface ResearchCache {
-  lookup(input: CompanyInput, options?: StorageReadOptions): Promise<CacheResolution>;
+  lookup(
+    context: StorageContext,
+    input: CompanyInput,
+    options?: StorageReadOptions,
+  ): Promise<CacheResolution>;
   select(
+    context: StorageContext,
     input: CompanyInput,
     companyId: string,
     options?: StorageReadOptions,
   ): Promise<ResearchSnapshot>;
   prepareRefresh(
+    context: StorageContext,
     input: CompanyInput,
     companyId: string,
     options?: StorageReadOptions,
   ): Promise<ResearchSnapshot>;
   resolveMiss(
+    context: StorageContext,
     input: CompanyInput,
     options?: StorageWriteOptions,
   ): Promise<{ companyId: string; identity: NormalizedCompanyIdentity }>;
   persist(
+    context: StorageContext,
     identity: NormalizedCompanyIdentity,
     snapshot: Omit<ResearchSnapshot, "lastSyncedAt">,
     options?: StorageWriteOptions,
@@ -210,15 +219,19 @@ export function decideCacheLookup(
 
 export function createResearchCache(storage: StorageAdapter): ResearchCache {
   return {
-    async lookup(input: CompanyInput, options?: StorageReadOptions): Promise<CacheResolution> {
+    async lookup(
+      context: StorageContext,
+      input: CompanyInput,
+      options?: StorageReadOptions,
+    ): Promise<CacheResolution> {
       const identity = normalizeCompanyIdentity(input);
-      const candidates = await storage.findIdentityCandidates(identity, options);
+      const candidates = await storage.findIdentityCandidates(context, identity, options);
       const decision = decideCacheLookup(identity, candidates);
 
       switch (decision.kind) {
         case "hit": {
           try {
-            const snapshot = await storage.getLatestCompleteSnapshot(decision.companyId, options);
+            const snapshot = await storage.getLatestCompleteSnapshot(context, decision.companyId, options);
             if (!snapshot) {
               return { kind: "miss", identity, cacheInvalid: false };
             }
@@ -238,7 +251,7 @@ export function createResearchCache(storage: StorageAdapter): ResearchCache {
           const suggestions: CacheSuggestion[] = [];
           for (const id of decision.companyIds) {
             try {
-              const snapshot = await storage.getLatestCompleteSnapshot(id, options);
+              const snapshot = await storage.getLatestCompleteSnapshot(context, id, options);
               if (snapshot) {
                 const candidate = candidates.find((c) => c.companyId === id);
                 suggestions.push({
@@ -273,11 +286,12 @@ export function createResearchCache(storage: StorageAdapter): ResearchCache {
     },
 
     async select(
+      context: StorageContext,
       input: CompanyInput,
       companyId: string,
       options?: StorageReadOptions
     ): Promise<ResearchSnapshot> {
-      const resolution = await this.lookup(input, options);
+      const resolution = await this.lookup(context, input, options);
       if (
         resolution.kind !== "suggestions" ||
         !resolution.suggestions.some((s) => s.companyId === companyId)
@@ -285,7 +299,7 @@ export function createResearchCache(storage: StorageAdapter): ResearchCache {
         throw new InvalidCacheSelectionError();
       }
 
-      const snapshot = await storage.getLatestCompleteSnapshot(companyId, options);
+      const snapshot = await storage.getLatestCompleteSnapshot(context, companyId, options);
       if (!snapshot) {
         throw new InvalidCacheSelectionError();
       }
@@ -293,12 +307,13 @@ export function createResearchCache(storage: StorageAdapter): ResearchCache {
     },
 
     async prepareRefresh(
+      context: StorageContext,
       input: CompanyInput,
       companyId: string,
       options?: StorageReadOptions
     ): Promise<ResearchSnapshot> {
       const identity = normalizeCompanyIdentity(input);
-      const candidates = await storage.findIdentityCandidates(identity, options);
+      const candidates = await storage.findIdentityCandidates(context, identity, options);
       const decision = decideCacheLookup(identity, candidates);
 
       if (decision.kind === "conflict") {
@@ -311,7 +326,7 @@ export function createResearchCache(storage: StorageAdapter): ResearchCache {
         throw new IdentityConflictError();
       }
 
-      const snapshot = await storage.getLatestCompleteSnapshot(companyId, options);
+      const snapshot = await storage.getLatestCompleteSnapshot(context, companyId, options);
       if (!snapshot) {
         throw new IdentityConflictError("Không tìm thấy dữ liệu công ty để làm mới.");
       }
@@ -319,21 +334,33 @@ export function createResearchCache(storage: StorageAdapter): ResearchCache {
     },
 
     async resolveMiss(
+      context: StorageContext,
       input: CompanyInput,
       options?: StorageWriteOptions
     ): Promise<{ companyId: string; identity: NormalizedCompanyIdentity }> {
       const identity = normalizeCompanyIdentity(input);
       const candidateId = crypto.randomUUID();
-      const companyId = await storage.resolveOrCreateIdentity(identity, candidateId, options);
+      const companyId = await storage.resolveOrCreateIdentity(
+        context,
+        identity,
+        candidateId,
+        options,
+      );
       return { companyId, identity };
     },
 
     async persist(
+      context: StorageContext,
       identity: NormalizedCompanyIdentity,
       snapshot: Omit<ResearchSnapshot, "lastSyncedAt">,
       options?: StorageWriteOptions
     ): Promise<ResearchSnapshot> {
-      return await storage.persistResearchSnapshot(identity, snapshot, options);
+      return await storage.persistResearchSnapshot(
+        context,
+        identity,
+        snapshot,
+        options,
+      );
     },
   };
 }

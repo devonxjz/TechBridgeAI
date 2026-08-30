@@ -212,14 +212,22 @@ export function createRegistryAdapter(): RegistryAdapter {
 export function createStorageAdapter(): StorageAdapter {
   if (_storage) return _storage;
 
-  switch (process.env.STORAGE_PROVIDER) {
+  const provider = process.env.STORAGE_PROVIDER;
+  if (process.env.NODE_ENV === "production" && provider !== "supabase") {
+    throw new Error("STORAGE_PROVIDER=supabase is required in production");
+  }
+
+  switch (provider) {
     case "memory":
       _storage = new MemoryStorageAdapter();
       break;
     case "supabase":
+      if (process.env.NODE_ENV === "production" && !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+        throw new Error("SUPABASE_SERVICE_ROLE_KEY is required in production");
+      }
       _storage = new SupabaseStorageAdapter(
         process.env.SUPABASE_URL,
-        process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+        process.env.SUPABASE_SERVICE_ROLE_KEY,
       );
       break;
     default:
