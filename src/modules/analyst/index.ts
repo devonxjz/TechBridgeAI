@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════
 // AnalystModule — Deep Module
 // Analyzes CompanyProfile, generates Collaboration Fit Score (5 criteria),
-// Risk Flags, Suggested Actions, and Executive Summary.
+// Risk Flags, Suggested Actions, and Executive Summary with claim evidence provenance.
 // ═══════════════════════════════════════════════════════
 
 import { z } from "zod";
@@ -12,13 +12,17 @@ import type {
   FitScore,
   RiskFlag,
   SuggestedAction,
+  FitScoreCriteria,
 } from "@/lib/types";
-import type { LLMAdapter } from "@/adapters/llm/types";
+import { LLMClaimEvidenceSchema } from "@/lib/types";
+import type { LLMAdapter, LLMInvocationContext } from "@/adapters/llm/types";
+import { buildClaimEvidence } from "@/modules/research/evidence";
 
 export interface AnalystModule {
   analyze(
     profile: CompanyProfile,
-    context?: AnalysisContext
+    context?: AnalysisContext,
+    llmContext?: LLMInvocationContext,
   ): Promise<AnalysisReport>;
 }
 
@@ -35,21 +39,36 @@ export const DEFAULT_CRITERIA_WEIGHTS: Record<string, number> = {
   "Recent Activity": 0.2,
 };
 
+const CRITERION_NAMES = [
+  "Industry Alignment",
+  "Company Size Match",
+  "Geographic Relevance",
+  "Digital Maturity",
+  "Recent Activity",
+] as const;
+
 const LLMAnalysisSchema = z.object({
   executiveSummary: z.string(),
   criteria: z.array(
     z.object({
-      name: z.string(),
+      name: z.enum(CRITERION_NAMES),
       score: z.number().min(0).max(100),
       reasoning: z.string(),
+      evidence: LLMClaimEvidenceSchema.nullable().default(null),
     })
-  ),
+  ).length(CRITERION_NAMES.length).superRefine((criteria, ctx) => {
+    const names = new Set(criteria.map((criterion) => criterion.name));
+    if (names.size !== criteria.length) {
+      ctx.addIssue({ code: "custom", message: "Each analysis criterion must be unique" });
+    }
+  }),
   riskFlags: z
     .array(
       z.object({
         type: z.enum(["legal", "financial", "reputation", "operational"]),
         description: z.string(),
         severity: z.enum(["high", "medium", "low"]),
+        evidence: LLMClaimEvidenceSchema.nullable().default(null),
       })
     )
     .default([]),
@@ -59,6 +78,7 @@ const LLMAnalysisSchema = z.object({
         action: z.string(),
         priority: z.enum(["high", "medium", "low"]),
         reasoning: z.string(),
+        evidence: LLMClaimEvidenceSchema.nullable().default(null),
       })
     )
     .default([]),
@@ -68,7 +88,7 @@ type LLMAnalysisOutput = z.infer<typeof LLMAnalysisSchema>;
 
 export function createAnalystModule(deps: AnalystDeps): AnalystModule {
   return {
-    async analyze(profile, context) {
+    async analyze(profile, context, llmContext) {
       const prompt = buildAnalysisPrompt(profile, context);
 
       const llmOutput = await deps.llm.completeStructured<LLMAnalysisOutput>(
@@ -77,18 +97,29 @@ export function createAnalystModule(deps: AnalystDeps): AnalystModule {
         {
           systemPrompt: ANALYST_SYSTEM_PROMPT,
           temperature: 0.2,
+          context: llmContext,
         }
       );
 
-      // Compute weighted overall score
-      const fitScore = calculateFitScore(llmOutput.criteria);
+      const sources = profile.sources || [];
+
+      // Compute weighted overall score with evidence
+      const fitScore = calculateFitScore(llmOutput.criteria, sources);
 
       const riskFlags: RiskFlag[] = llmOutput.riskFlags.map((rf) => ({
-        ...rf,
+        type: rf.type,
+        description: rf.description,
+        severity: rf.severity,
         source: "news",
+        evidence: rf.evidence ? buildClaimEvidence(rf.evidence, sources) : undefined,
       }));
 
-      const suggestedActions: SuggestedAction[] = llmOutput.suggestedActions;
+      const suggestedActions: SuggestedAction[] = llmOutput.suggestedActions.map((sa) => ({
+        action: sa.action,
+        priority: sa.priority,
+        reasoning: sa.reasoning,
+        evidence: sa.evidence ? buildClaimEvidence(sa.evidence, sources) : undefined,
+      }));
 
       const report: AnalysisReport = {
         companyId: profile.id,
@@ -107,7 +138,7 @@ export function createAnalystModule(deps: AnalystDeps): AnalystModule {
 // ─── Helpers ───
 
 const ANALYST_SYSTEM_PROMPT = `Bạn là chuyên gia thẩm định và phân tích đối tác kinh doanh (Partner Intelligence Analyst).
-Nhiệm vụ: Đánh giá toàn diện hồ sơ doanh nghiệp Việt Nam, tính điểm tiềm năng hợp tác (Collaboration Fit Score), phát hiện rủi ro và đề xuất hành động tiếp cận.
+Nhiệm vụ: Đánh giá toàn diện hồ sơ doanh nghiệp Việt Nam, tính điểm tiềm năng hợp tác (Collaboration Fit Score), phát hiện rủi ro và đề xuất hành động tiếp cận kèm trích dẫn chứng cứ.
 
 Đánh giá bắt buộc theo 5 tiêu chí sau:
 1. "Industry Alignment" (Trọng số 0.30): Mức độ liên quan, bổ trợ và phù hợp của ngành nghề hoạt động.
@@ -118,6 +149,7 @@ Nhiệm vụ: Đánh giá toàn diện hồ sơ doanh nghiệp Việt Nam, tính
 
 Quy tắc:
 - Cho điểm từ 0 đến 100 cho mỗi tiêu chí kèm giải thích ngắn gọn, súc tích (1-2 câu).
+- Cung cấp trích dẫn chứng cứ (supportingUrls) từ danh sách nguồn được cung cấp.
 - Nhận diện các rủi ro (Risk Flags) nếu có dấu hiệu bất thường (pháp lý, tài chính, uy tín).
 - Đề xuất 2-4 hành động cụ thể (Suggested Actions) để tiếp cận hoặc xúc tiến hợp tác.
 - Viết tóm tắt tổng quan (executiveSummary) bằng tiếng Việt rõ ràng, chuyên nghiệp.`;
@@ -141,6 +173,11 @@ function buildAnalysisPrompt(
   const keyPeople = (profile.keyPeople ?? []).map((p) => `${p.name} (${p.title})`).join("; ") || "Chưa rõ";
   const recentActivities = (profile.recentActivities ?? []).map((a) => `- ${a.title}: ${a.summary}`).join("\n") || "Không có";
 
+  const sourceItems = (profile.sources ?? []).map((s, idx) => {
+    const pub = s.publication?.publisherName || s.publication?.publisherDomain || "";
+    return `[${idx + 1}] URL: ${s.url} | Title: ${s.title || ""} | Publisher: ${pub}`;
+  }).join("\n");
+
   return `Phân tích và đánh giá tiềm năng hợp tác cho doanh nghiệp sau:
 
 Tên chính thức: ${profile.officialName}
@@ -155,19 +192,31 @@ Thị trường: ${markets}
 Nhân sự chủ chốt: ${keyPeople}
 Hoạt động gần đây: ${recentActivities}
 ${contextInfo}
-Hãy đánh giá 5 tiêu chí ("Industry Alignment", "Company Size Match", "Geographic Relevance", "Digital Maturity", "Recent Activity"), phát hiện rủi ro và gợi ý hành động tiếp cận. Trả về JSON theo đúng schema.`;
+
+Danh sách nguồn kiểm chứng:
+${sourceItems || "Không có nguồn cụ thể"}
+
+Hãy đánh giá 5 tiêu chí ("Industry Alignment", "Company Size Match", "Geographic Relevance", "Digital Maturity", "Recent Activity"), phát hiện rủi ro và gợi ý hành động tiếp cận kèm supportingUrls. Trả về JSON theo đúng schema.`;
 }
 
 function calculateFitScore(
-  criteriaList: { name: string; score: number; reasoning: string }[]
+  criteriaList: {
+    name: string;
+    score: number;
+    reasoning: string;
+    evidence?: { supportingUrls: string[]; conflictingUrls: string[] } | null;
+  }[],
+  sources: CompanyProfile["sources"] = []
 ): FitScore {
-  const criteriaWithWeights = criteriaList.map((c) => {
+  const criteriaWithWeights: FitScoreCriteria[] = criteriaList.map((c) => {
     const weight = DEFAULT_CRITERIA_WEIGHTS[c.name] ?? 0.2;
+    const evidence = c.evidence ? buildClaimEvidence(c.evidence, sources) : undefined;
     return {
       name: c.name,
       score: Math.min(100, Math.max(0, Math.round(c.score))),
       weight,
       reasoning: c.reasoning,
+      evidence,
     };
   });
 

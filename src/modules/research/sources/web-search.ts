@@ -1,9 +1,6 @@
-// ═══════════════════════════════════════════════════════
-// Research Module — Source: Web Search
-// ═══════════════════════════════════════════════════════
-
 import type { CompanyInput, RawFinding } from "@/lib/types";
 import type { SearchAdapter } from "@/adapters/search/types";
+import { buildResearchQueries, applyDomainPolicy } from "../queries";
 
 /**
  * Search the web for company information.
@@ -11,52 +8,45 @@ import type { SearchAdapter } from "@/adapters/search/types";
  */
 export async function searchWeb(
   input: CompanyInput,
-  searchAdapter: SearchAdapter
+  searchAdapter: SearchAdapter,
+  customQueries?: string[]
 ): Promise<RawFinding[]> {
-  const queries = buildSearchQueries(input);
+  const queries = customQueries ?? buildResearchQueries(input).web;
   const findings: RawFinding[] = [];
 
-  for (const query of queries) {
-    const results = await searchAdapter.search(query, {
-      maxResults: 5,
-      language: "vi",
-      region: "vn",
-    });
+  const resultsByQuery = await Promise.all(
+    queries.map(async (query, queryIndex) => {
+      const rawResults = await searchAdapter.search(query, {
+        maxResults: 10,
+        language: "vi",
+        region: "vn",
+        vertical: "web",
+      });
 
-    for (const result of results) {
-      findings.push({
-        source: "web_search",
+      const selectedResults = applyDomainPolicy(rawResults, input.sourcePolicy, 5);
+      const providerRankByUrl = new Map(
+        rawResults.map((result, index) => [result.url, index + 1]),
+      );
+      return selectedResults.map((result) => ({
+        source: "web_search" as const,
         url: result.url,
         content: `[${result.title}]\n${result.snippet}`,
         extractedAt: new Date(),
         confidence: 0.6,
-        metadata: { query, title: result.title },
-      });
-    }
+        metadata: {
+          query,
+          queryIndex,
+          providerRank: providerRankByUrl.get(result.url),
+          title: result.title,
+          publisherName: result.publisherName,
+        },
+      }));
+    })
+  );
+
+  for (const group of resultsByQuery) {
+    findings.push(...group);
   }
 
   return findings;
-}
-
-function buildSearchQueries(input: CompanyInput): string[] {
-  const queries: string[] = [];
-  const name = input.name;
-
-  // Primary query
-  queries.push(`"${name}" công ty thông tin`);
-
-  // Products/services query
-  queries.push(`"${name}" sản phẩm dịch vụ ngành nghề`);
-
-  // If tax ID provided, search specifically
-  if (input.taxId) {
-    queries.push(`"${input.taxId}" mã số thuế doanh nghiệp`);
-  }
-
-  // Additional keywords
-  if (input.additionalKeywords?.length) {
-    queries.push(`"${name}" ${input.additionalKeywords.join(" ")}`);
-  }
-
-  return queries;
 }

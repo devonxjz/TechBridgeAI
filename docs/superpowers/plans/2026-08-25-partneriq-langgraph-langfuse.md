@@ -37,7 +37,7 @@
 | `src/modules/research/evidence.ts` | Create | Validate, deduplicate, prioritize, and frame findings |
 | `src/modules/research/budget.ts` | Create | Enforce per-run call/token/provider concurrency budgets |
 | `src/modules/research/index.ts` | Modify | Expose existing source runners without sequential orchestration |
-| `src/modules/workflow/state.ts` | Create | LangGraph state schema and append reducers |
+| `src/modules/workflow/state.ts` | Create | LangGraph state schema and source-result reducer |
 | `src/modules/workflow/index.ts` | Create | Build/compile graph, nodes, edges, and custom event stream |
 | `src/adapters/llm/openai.ts` | Modify | Implement existing LLM port with LangChain ChatOpenAI |
 | `src/adapters/llm/types.ts` | Modify | Carry usage/cancellation/callback context without exposing LangChain types |
@@ -253,6 +253,7 @@ git commit -m "feat(research): prepare deterministic evidence"
 
 - Create: `src/modules/research/queries.ts`
 - Create: `src/modules/research/budget.ts`
+- Modify: `src/adapters/llm/types.ts`
 - Modify: `src/modules/research/sources/web-search.ts`
 - Modify: `src/modules/research/sources/news.ts`
 - Modify: `src/config/index.ts`
@@ -280,6 +281,18 @@ export interface ResearchBudget {
 }
 ```
 
+Define the provider-neutral contract in `src/adapters/llm/types.ts`:
+
+```ts
+export interface LLMBudget {
+  claimModelCall(estimatedInputTokens: number): void;
+  recordModelUsage(usage: LLMUsageLog): void;
+}
+```
+
+`ResearchBudget` implements `LLMBudget`; the LLM adapter must not import the
+research module.
+
 - [ ] **Step 1: Write failing query-plan tests**
 
 ```ts
@@ -302,7 +315,7 @@ The ordered categories are identity, products/services, leadership, recent activ
 ```ts
 it("rejects before a model call exceeds the run budget", () => {
   const budget = createResearchBudget({
-    maxLLMCalls: 1,
+    maxLLMCalls: 5,
     maxTokens: 100,
     maxConcurrentProviderCalls: 2,
   });
@@ -357,7 +370,7 @@ Expected: PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/modules/research/queries.ts src/modules/research/budget.ts src/modules/research/sources/web-search.ts src/modules/research/sources/news.ts src/config/index.ts .env.example tests/unit/research-queries.test.ts tests/unit/research-budget.test.ts tests/unit/sources.test.ts
+git add src/modules/research/queries.ts src/modules/research/budget.ts src/adapters/llm/types.ts src/modules/research/sources/web-search.ts src/modules/research/sources/news.ts src/config/index.ts .env.example tests/unit/research-queries.test.ts tests/unit/research-budget.test.ts tests/unit/sources.test.ts
 git commit -m "feat(research): enforce bounded query budgets"
 ```
 
@@ -377,7 +390,12 @@ git commit -m "feat(research): enforce bounded query budgets"
 export interface LLMInvocationContext {
   signal?: AbortSignal;
   callbacks?: readonly unknown[];
-  budget?: ResearchBudget;
+  budget?: LLMBudget;
+}
+
+export interface LLMBudget {
+  claimModelCall(estimatedInputTokens: number): void;
+  recordModelUsage(usage: LLMUsageLog): void;
 }
 
 export interface LLMOptions {
@@ -466,6 +484,17 @@ export interface ResearchWorkflowOptions {
   callbacks?: readonly unknown[];
 }
 
+export interface ResearchWorkflowDeps {
+  llm: LLMAdapter;
+  search: SearchAdapter;
+  scraper: ScraperAdapter;
+  registry: RegistryAdapter;
+  storage: StorageAdapter;
+  profile: ProfileModule;
+  analyst: AnalystModule;
+  guards: ResourceGuards;
+}
+
 export interface ResearchWorkflow {
   stream(
     input: CompanyInput,
@@ -504,7 +533,7 @@ Expected: FAIL because the workflow graph is absent.
 
 - [ ] **Step 5: Define Zod-backed graph state and reducers**
 
-`state.ts` owns the state keys from the spec. The `sourceResults` and `findings` reducers append arrays. Defaults are empty arrays/null values; no adapter or function is stored in state.
+`state.ts` owns the state keys from the spec. Only `sourceResults` uses an append reducer. `prepare_evidence` derives and overwrites `findings`, avoiding duplicate parallel writes. Defaults are empty arrays/null values; no adapter or function is stored in state.
 
 - [ ] **Step 6: Refactor source construction without changing source logic**
 
@@ -683,13 +712,12 @@ const workflow = createResearchWorkflow(deps);
 for await (const event of workflow.stream(input, {
   researchRunId,
   signal: req.signal,
-  callbacks,
 })) {
   writer.write(event);
 }
 ```
 
-Use one `closeWriter()` guard in `finally`; do not close in intermediate branches. Export `runtime = "nodejs"`. Configure `maxDuration` to the active Vercel-plan value during deployment, and keep the internal workflow deadline at least ten seconds shorter.
+Use one `closeWriter()` guard in `finally`; do not close in intermediate branches. Export `runtime = "nodejs"` and `maxDuration = 300`. Enforce a 285-second internal deadline so terminal SSE output and Langfuse flush retain a 15-second margin.
 
 - [ ] **Step 5: Propagate abort through adapters**
 
@@ -804,13 +832,13 @@ Set root `WARNING` for partial success and `ERROR` for failed outcome. Flush onc
 ```dotenv
 LANGFUSE_PUBLIC_KEY=
 LANGFUSE_SECRET_KEY=
-LANGFUSE_BASE_URL=https://jp.cloud.langfuse.com
+LANGFUSE_BASE_URL=
 LANGFUSE_TRACING_ENVIRONMENT=production
 LANGFUSE_LOG_LEVEL=WARN
 LANGFUSE_ENABLED=true
 ```
 
-Document that the Japan region is the selected default for latency proximity; changing region requires changing the Langfuse project/account endpoint. When `LANGFUSE_ENABLED` is not `true`, use a no-op callback and skip export.
+Require `LANGFUSE_BASE_URL` to match the endpoint shown by the selected Langfuse Cloud project; do not hard-code a region in application code. When `LANGFUSE_ENABLED` is not `true`, use a no-op callback and skip export.
 
 - [ ] **Step 7: Run focused observability and E2E tests**
 
@@ -873,7 +901,7 @@ README must include:
 
 - exact install/runtime requirements;
 - Vercel environment variables and `maxDuration` rule;
-- Langfuse Cloud setup and Japan endpoint;
+- Langfuse Cloud setup and project-region endpoint;
 - what data is and is not exported;
 - cancellation behavior;
 - concurrency/query/token defaults;

@@ -1,105 +1,95 @@
-// ═══════════════════════════════════════════════════════
-// OpenAI LLM Adapter
-// ═══════════════════════════════════════════════════════
-
 import OpenAI from "openai";
-import { z } from "zod";
-import { zodResponseFormat } from "openai/helpers/zod";
+import { zodTextFormat } from "openai/helpers/zod";
+import type { z } from "zod";
 import type { LLMAdapter, LLMOptions, LLMUsageLog } from "./types";
 
 const DEFAULT_MODEL = "gpt-4o-mini";
 
+interface ParsedResponse {
+  output_parsed: unknown | null;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+  } | null;
+}
+
+interface OpenAIClientLike {
+  responses: {
+    parse(
+      body: unknown,
+      options?: { signal?: AbortSignal },
+    ): Promise<ParsedResponse>;
+  };
+}
+
+export interface OpenAIAdapterOptions {
+  client?: OpenAIClientLike;
+}
+
 export class OpenAIAdapter implements LLMAdapter {
-  private client: OpenAI;
-  private usageLogs: LLMUsageLog[] = [];
+  private readonly client: OpenAIClientLike;
 
-  constructor(apiKey: string) {
-    this.client = new OpenAI({ apiKey });
-  }
-
-  async complete(prompt: string, options?: LLMOptions): Promise<string> {
-    const response = await this.client.chat.completions.create({
-      model: options?.model ?? DEFAULT_MODEL,
-      temperature: options?.temperature ?? 0.3,
-      max_tokens: options?.maxTokens,
-      messages: [
-        ...(options?.systemPrompt
-          ? [{ role: "system" as const, content: options.systemPrompt }]
-          : []),
-        { role: "user" as const, content: prompt },
-      ],
-    });
-
-    this.logUsage(response, options?.model ?? DEFAULT_MODEL);
-    return response.choices[0]?.message?.content ?? "";
+  constructor(apiKey: string, options?: OpenAIAdapterOptions) {
+    this.client = options?.client ?? (new OpenAI({ apiKey }) as unknown as OpenAIClientLike);
   }
 
   async completeStructured<T>(
     prompt: string,
     schema: z.ZodSchema<T>,
-    options?: LLMOptions
+    options?: LLMOptions,
   ): Promise<T> {
-    const response = await this.client.chat.completions.create({
-      model: options?.model ?? DEFAULT_MODEL,
-      temperature: options?.temperature ?? 0.2,
-      max_tokens: options?.maxTokens,
-      messages: [
-        ...(options?.systemPrompt
-          ? [{ role: "system" as const, content: options.systemPrompt }]
-          : []),
-        { role: "user" as const, content: prompt },
-      ],
-      response_format: zodResponseFormat(schema as z.ZodType, "structured_output"),
-    });
+    const input = [
+      ...(options?.systemPrompt
+        ? [{ role: "system" as const, content: options.systemPrompt }]
+        : []),
+      { role: "user" as const, content: prompt },
+    ];
+    const model = options?.model ?? DEFAULT_MODEL;
 
-    this.logUsage(response, options?.model ?? DEFAULT_MODEL);
-    const raw = response.choices[0]?.message?.content ?? "{}";
-    return schema.parse(JSON.parse(raw));
-  }
+    options?.context?.budget?.claimModelCall(estimateTokens(input));
 
-  async *stream(
-    prompt: string,
-    options?: LLMOptions
-  ): AsyncGenerator<string, void, unknown> {
-    const stream = await this.client.chat.completions.create({
-      model: options?.model ?? DEFAULT_MODEL,
-      temperature: options?.temperature ?? 0.3,
-      max_tokens: options?.maxTokens,
-      messages: [
-        ...(options?.systemPrompt
-          ? [{ role: "system" as const, content: options.systemPrompt }]
-          : []),
-        { role: "user" as const, content: prompt },
-      ],
-      stream: true,
-    });
-
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content;
-      if (content) yield content;
-    }
-  }
-
-  getUsageLogs(): LLMUsageLog[] {
-    return [...this.usageLogs];
-  }
-
-  private logUsage(
-    response: OpenAI.Chat.Completions.ChatCompletion,
-    model: string
-  ): void {
-    if (response.usage) {
-      const log: LLMUsageLog = {
+    const response = await this.client.responses.parse(
+      {
         model,
-        promptTokens: response.usage.prompt_tokens,
-        completionTokens: response.usage.completion_tokens,
+        input,
+        temperature: options?.temperature,
+        max_output_tokens: options?.maxTokens,
+        text: {
+          format: zodTextFormat(
+            schema,
+            options?.schemaName ?? "structured_output",
+          ),
+        },
+      },
+      { signal: options?.context?.signal },
+    );
+
+    if (response.usage) {
+      const usage: LLMUsageLog = {
+        model,
+        promptTokens: response.usage.input_tokens,
+        completionTokens: response.usage.output_tokens,
         totalTokens: response.usage.total_tokens,
         timestamp: new Date(),
       };
-      this.usageLogs.push(log);
-      console.log(
-        `[LLM] ${model}: ${log.promptTokens}+${log.completionTokens}=${log.totalTokens} tokens`
-      );
+      options?.context?.budget?.recordModelUsage(usage);
     }
+
+    if (response.output_parsed === null) {
+      throw new Error("Structured output parsing failed");
+    }
+
+    return response.output_parsed as T;
   }
+}
+
+function estimateTokens(
+  input: ReadonlyArray<{ content: string }>,
+): number {
+  const characterCount = input.reduce(
+    (total, message) => total + message.content.length,
+    0,
+  );
+  return Math.max(10, Math.ceil(characterCount / 4));
 }

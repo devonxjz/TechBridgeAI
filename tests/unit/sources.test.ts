@@ -42,6 +42,10 @@ describe("Research Sources Unit Tests", () => {
       expect(findings.length).toBeGreaterThan(0);
       expect(findings[0].source).toBe("web_search");
       expect(findings[0].confidence).toBe(0.6);
+      expect(findings[0].metadata).toMatchObject({
+        queryIndex: 0,
+        providerRank: 1,
+      });
       expect(search.callLog.some((c) => c.query.includes("mã số thuế"))).toBe(true);
       expect(search.callLog.some((c) => c.query.includes("AI"))).toBe(true);
     });
@@ -163,8 +167,95 @@ describe("Research Sources Unit Tests", () => {
       expect(findings.length).toBe(2);
       expect(findings.every((f) => !f.url.includes("vingroup.net"))).toBe(true);
       expect(findings[0].source).toBe("news");
+      expect(search.callLog.some((c) => c.options?.vertical === "news")).toBe(true);
+    });
+
+    it("preserves the original provider rank for each news query", async () => {
+      search.setResults('"FPT" tin tức hoạt động mới nhất', [
+        { title: "Lower ranked", url: "https://news.example/lower", snippet: "lower" },
+        { title: "Top ranked", url: "https://news.example/top", snippet: "top" },
+      ]);
+
+      const findings = await searchNews({ name: "FPT" }, search, undefined, undefined, [
+        '"FPT" tin tức hoạt động mới nhất',
+      ]);
+
+      expect(findings.map((item) => item.metadata)).toEqual([
+        expect.objectContaining({ queryIndex: 0, providerRank: 1 }),
+        expect.objectContaining({ queryIndex: 0, providerRank: 2 }),
+      ]);
+    });
+
+    it("extracts publication via scraper when available, producing server_extract", async () => {
+      search.setResults("FPT", [
+        {
+          title: "FPT KQKD",
+          url: "https://vnexpress.net/fpt-kqkd",
+          snippet: "Snippet text",
+          publisherName: "VnExpress",
+        },
+      ]);
+      scraper.setPage("https://vnexpress.net/fpt-kqkd", {
+        url: "https://vnexpress.net/fpt-kqkd",
+        title: "FPT KQKD 2026",
+        text: "Doanh thu FPT vượt kỳ vọng trong quý 3.",
+        html: "<article><p>Doanh thu FPT vượt kỳ vọng trong quý 3.</p></article>",
+      });
+
+      const input: CompanyInput = { name: "FPT" };
+      const findings = await searchNews(input, search, scraper, undefined, ["FPT tin tức"]);
+
+      expect(findings.length).toBe(1);
+      expect(findings[0].fetchMethod).toBe("server_extract");
+      expect(findings[0].excerpt).toContain("Doanh thu FPT vượt kỳ vọng");
+      expect(findings[0].publication?.publisherDomain).toBe("vnexpress.net");
+    });
+
+    it("falls back to search snippet when scraper fails", async () => {
+      search.setResults("FPT", [
+        {
+          title: "FPT News",
+          url: "https://unknown.vn/fpt",
+          snippet: "Snippet from search engine",
+        },
+      ]);
+
+      const input: CompanyInput = { name: "FPT" };
+      const findings = await searchNews(input, search, scraper, undefined, ["FPT tin tức"]);
+
+      expect(findings.length).toBe(1);
+      expect(findings[0].fetchMethod).toBe("search_snippet");
+      expect(findings[0].excerpt).toBe("Snippet from search engine");
+    });
+
+    it("respects domain policy in searchNews: 'only' filters and 'prefer' prioritizes", async () => {
+      search.setResults("FPT", [
+        { title: "News A", url: "https://other.com/1", snippet: "Other news" },
+        { title: "News B", url: "https://vnexpress.net/2", snippet: "VnExpress news" },
+        { title: "News C", url: "https://dantri.com.vn/3", snippet: "DanTri news" },
+      ]);
+
+      // Only mode
+      const inputOnly: CompanyInput = {
+        name: "FPT",
+        sourcePolicy: { mode: "only", domains: ["vnexpress.net"] },
+      };
+      const findingsOnly = await searchNews(inputOnly, search, undefined, undefined, ["FPT tin tức"]);
+      expect(findingsOnly.length).toBe(1);
+      expect(findingsOnly[0].url).toContain("vnexpress.net");
+
+      // Prefer mode
+      const inputPrefer: CompanyInput = {
+        name: "FPT",
+        sourcePolicy: { mode: "prefer", domains: ["dantri.com.vn"] },
+      };
+      const findingsPrefer = await searchNews(inputPrefer, search, undefined, undefined, ["FPT tin tức"]);
+      expect(findingsPrefer.length).toBe(3);
+      expect(findingsPrefer[0].url).toContain("dantri.com.vn");
     });
   });
+
+
 
   describe("registry source", () => {
     it("uses VietQR first when taxId is provided and succeeds with high confidence", async () => {

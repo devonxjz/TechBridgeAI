@@ -1,18 +1,45 @@
 "use client";
 
 import { useState } from "react";
-import type { CompanyProfile, ProfileDiff, AnalysisReport } from "@/lib/types";
+import type { CompanyProfile, ProfileDiff, AnalysisReport, SourceCitation, ProfileField, ClaimEvidence } from "@/lib/types";
 import { exportProfileToMarkdown, exportProfileToJSON } from "@/lib/export";
 import { ExportPdfButton } from "./export-pdf-button";
+import { SourcePreviewDialog } from "./source-preview-dialog";
+import { EvidenceBadge } from "./evidence-badge";
+import { FitScoreSection } from "./fit-score-section";
+import { SourceListSection } from "./source-list-section";
 
 interface ProfileCardProps {
   profile: CompanyProfile;
   diff: ProfileDiff | null;
   report?: AnalysisReport | null;
 }
-
 export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
   const [copied, setCopied] = useState(false);
+  const [selectedCitation, setSelectedCitation] = useState<SourceCitation | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+
+  const handleOpenPreview = (citationOrUrl: SourceCitation | string) => {
+    if (typeof citationOrUrl === "string") {
+      const found = profile.sources.find((s) => s.url === citationOrUrl);
+      if (found) {
+        setSelectedCitation(found);
+        setIsPreviewOpen(true);
+      } else {
+        window.open(citationOrUrl, "_blank", "noopener,noreferrer");
+      }
+    } else {
+      setSelectedCitation(citationOrUrl);
+      setIsPreviewOpen(true);
+    }
+  };
+
+  const handleFieldEvidenceClick = (field: ProfileField) => {
+    const claim = profile.fieldEvidence?.[field];
+    if (claim && claim.supportingUrls.length > 0) {
+      handleOpenPreview(claim.supportingUrls[0]);
+    }
+  };
 
   const handleCopyMarkdown = async () => {
     const md = exportProfileToMarkdown(profile, report, diff);
@@ -44,18 +71,24 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
   };
 
   return (
-    <div className="glass-card overflow-hidden animate-fade-in space-y-0">
+    <div className="glass-card min-w-0 overflow-hidden animate-fade-in space-y-0">
       {/* Header */}
       <div className="p-6 border-b border-card-border bg-gradient-to-r from-accent/10 via-purple-500/5 to-transparent">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2.5">
               <h2 className="text-2xl font-bold gradient-text">
                 {profile.officialName}
               </h2>
               <span className="px-2 py-0.5 text-xs font-semibold rounded-md bg-accent/20 text-accent-light border border-accent/30">
                 v{profile.version}
               </span>
+              {profile.fieldEvidence?.officialName && (
+                <EvidenceBadge
+                  evidence={profile.fieldEvidence.officialName}
+                  onClick={() => handleFieldEvidenceClick("officialName")}
+                />
+              )}
             </div>
             {profile.tradingNames.length > 0 && (
               <p className="text-sm text-muted mt-1">
@@ -109,7 +142,7 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
                          transition-colors flex items-center gap-1.5 active:scale-95"
               title="Tải tệp JSON"
             >
-              {} Tải JSON
+              &#123;&#125; Tải JSON
             </button>
           </div>
         </div>
@@ -119,133 +152,24 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
       <div className="p-6 space-y-6">
         {/* ─── Collaboration Fit Score (Analyst Module) ─── */}
         {report && report.fitScore && (
-          <div className="glass-card p-5 bg-gradient-to-br from-surface/80 to-accent/5 border border-accent/20 rounded-xl space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-card-border pb-3">
-              <div className="flex items-center gap-3">
-                <FitScoreGauge score={report.fitScore.score} />
-                <div>
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">
-                    Điểm Tiềm năng Hợp tác (Collaboration Fit)
-                  </h3>
-                  <p className="text-xs text-muted mt-0.5">
-                    {report.fitScore.reasoning}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Criteria Breakdown (5 Core Criteria) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-              {report.fitScore.criteria.map((c) => (
-                <div key={c.name} className="bg-surface/90 rounded-lg p-3 border border-card-border">
-                  <div className="flex items-center justify-between text-xs mb-1.5">
-                    <span className="font-semibold text-foreground/90">
-                      {c.name} <span className="text-muted/60">({Math.round(c.weight * 100)}%)</span>
-                    </span>
-                    <span className={`font-bold ${c.score >= 80 ? "text-success" : c.score >= 60 ? "text-warning" : "text-error"}`}>
-                      {c.score}/100
-                    </span>
-                  </div>
-                  <div className="w-full h-1.5 bg-card-border rounded-full overflow-hidden mb-2">
-                    <div
-                      className={`h-full rounded-full ${
-                        c.score >= 80
-                          ? "bg-success"
-                          : c.score >= 60
-                            ? "bg-warning"
-                            : "bg-error"
-                      }`}
-                      style={{ width: `${c.score}%` }}
-                    />
-                  </div>
-                  <p className="text-xs text-muted leading-relaxed">
-                    {c.reasoning}
-                  </p>
-                </div>
-              ))}
-            </div>
-
-            {/* Executive Summary */}
-            {report.executiveSummary && (
-              <div className="pt-2">
-                <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-1.5">
-                  Nhận định chuyên gia (Executive Summary)
-                </p>
-                <p className="text-xs text-foreground/80 leading-relaxed bg-surface/70 rounded-lg p-3 border border-card-border">
-                  {report.executiveSummary}
-                </p>
-              </div>
-            )}
-
-            {/* Risk Flags & Suggested Actions Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-              {/* Risk Flags */}
-              {report.riskFlags.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">
-                    Cảnh báo rủi ro ({report.riskFlags.length})
-                  </p>
-                  <div className="space-y-2">
-                    {report.riskFlags.map((rf, i) => (
-                      <div
-                        key={i}
-                        className={`text-xs p-2.5 rounded-lg border-l-2 bg-surface/80 ${
-                          rf.severity === "high"
-                            ? "border-l-error text-error/90"
-                            : rf.severity === "medium"
-                              ? "border-l-warning text-warning/90"
-                              : "border-l-muted text-muted"
-                        }`}
-                      >
-                        <span className="font-semibold uppercase tracking-wider text-[10px] block">
-                          [{rf.type}] {rf.severity}
-                        </span>
-                        {rf.description}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Suggested Actions */}
-              {report.suggestedActions.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">
-                    Gợi ý hành động tiếp cận ({report.suggestedActions.length})
-                  </p>
-                  <div className="space-y-2">
-                    {report.suggestedActions.map((sa, i) => (
-                      <div
-                        key={i}
-                        className="text-xs p-2.5 rounded-lg bg-surface/80 border border-card-border"
-                      >
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <span
-                            className={`px-1.5 py-0.2 text-[10px] font-bold rounded uppercase ${
-                              sa.priority === "high"
-                                ? "bg-accent/20 text-accent-light"
-                                : "bg-card-border text-muted"
-                            }`}
-                          >
-                            {sa.priority}
-                          </span>
-                          <span className="font-semibold text-foreground">{sa.action}</span>
-                        </div>
-                        <p className="text-muted leading-relaxed">{sa.reasoning}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+          <FitScoreSection report={report} onOpenPreview={handleOpenPreview} />
         )}
 
         {/* Description */}
         <Section title="Tổng quan">
-          <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">
-            {profile.description}
-          </p>
+          <div className="p-3.5 rounded-xl bg-surface/60 border border-card-border/40">
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">
+                {profile.description}
+              </p>
+              {profile.fieldEvidence?.description && (
+                <EvidenceBadge
+                  evidence={profile.fieldEvidence.description}
+                  onClick={() => handleFieldEvidenceClick("description")}
+                />
+              )}
+            </div>
+          </div>
         </Section>
 
         {/* Key Info Grid */}
@@ -253,28 +177,53 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
           {profile.website && (
             <InfoItem
               label="Website"
-              value={
-                <a
-                  href={profile.website}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-accent-light hover:underline"
-                >
-                  {profile.website.replace(/^https?:\/\//, "")}
-                </a>
-              }
+              href={profile.website}
+              title="Nhấn để mở website chính thức"
+              value={profile.website.replace(/^https?:\/\//, "")}
+              evidence={profile.fieldEvidence?.website}
+              onEvidenceClick={() => handleFieldEvidenceClick("website")}
             />
           )}
-          {profile.taxId && <InfoItem label="Mã số thuế" value={profile.taxId} />}
+          {profile.taxId && (
+            <InfoItem
+              label="Mã số thuế"
+              href={`https://masothue.com/Search/?q=${encodeURIComponent(profile.taxId)}&type=auto`}
+              title="Nhấn để kiểm tra mã số thuế trên cổng ĐKKD"
+              value={profile.taxId}
+              evidence={profile.fieldEvidence?.taxId}
+              onEvidenceClick={() => handleFieldEvidenceClick("taxId")}
+            />
+          )}
           {profile.foundedYear && (
-            <InfoItem label="Năm thành lập" value={String(profile.foundedYear)} />
+            <InfoItem
+              label="Năm thành lập"
+              value={String(profile.foundedYear)}
+              evidence={profile.fieldEvidence?.foundedYear}
+              onEvidenceClick={() => handleFieldEvidenceClick("foundedYear")}
+            />
           )}
           {profile.companySize && (
-            <InfoItem label="Quy mô" value={`${profile.companySize} nhân sự`} />
+            <InfoItem
+              label="Quy mô"
+              value={`${profile.companySize} nhân sự`}
+              evidence={profile.fieldEvidence?.companySize}
+              onEvidenceClick={() => handleFieldEvidenceClick("companySize")}
+            />
           )}
           {profile.headquarters && (
             <InfoItem
               label="Trụ sở"
+              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                [
+                  profile.headquarters.street,
+                  profile.headquarters.city,
+                  profile.headquarters.province,
+                  profile.headquarters.country,
+                ]
+                  .filter(Boolean)
+                  .join(", ")
+              )}`}
+              title="Nhấn để xem địa chỉ trụ sở trên Google Maps"
               value={[
                 profile.headquarters.city,
                 profile.headquarters.province,
@@ -282,6 +231,8 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
               ]
                 .filter(Boolean)
                 .join(", ")}
+              evidence={profile.fieldEvidence?.headquarters}
+              onEvidenceClick={() => handleFieldEvidenceClick("headquarters")}
             />
           )}
         </div>
@@ -293,13 +244,15 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
               {profile.keyPeople.map((person, i) => (
                 <div
                   key={i}
-                  className="flex items-center gap-3 bg-surface rounded-xl px-4 py-2.5"
+                  className="flex items-center gap-3 bg-surface rounded-xl px-4 py-2.5 border border-card-border/40"
                 >
                   <div className="w-8 h-8 bg-accent/20 rounded-full flex items-center justify-center text-sm font-bold text-accent-light">
                     {person.name.charAt(0)}
                   </div>
-                  <div>
-                    <p className="text-sm font-medium">{person.name}</p>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-foreground">
+                      {person.name}
+                    </p>
                     <p className="text-xs text-muted">{person.title}</p>
                   </div>
                 </div>
@@ -315,7 +268,8 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
               {profile.products.map((p) => (
                 <span
                   key={p}
-                  className="px-3 py-1 text-xs bg-surface rounded-lg border border-card-border"
+                  className="px-3 py-1.5 text-xs font-medium bg-surface text-foreground
+                             rounded-lg border border-card-border/60"
                 >
                   {p}
                 </span>
@@ -331,7 +285,7 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
               {profile.markets.map((m) => (
                 <span
                   key={m}
-                  className="px-3 py-1 text-xs bg-surface rounded-lg border border-card-border"
+                  className="px-3 py-1 text-xs bg-surface text-muted rounded-md border border-card-border/40"
                 >
                   {m}
                 </span>
@@ -342,85 +296,45 @@ export function ProfileCard({ profile, diff, report }: ProfileCardProps) {
 
         {/* Recent Activities */}
         {profile.recentActivities.length > 0 && (
-          <Section title="Hoạt động gần đây">
-            <div className="space-y-2">
-              {profile.recentActivities.slice(0, 5).map((act, i) => (
-                <div key={i} className="bg-surface rounded-xl px-4 py-3">
-                  <p className="text-sm font-medium">{act.title}</p>
-                  <p className="text-xs text-muted mt-1">{act.summary}</p>
-                </div>
-              ))}
-            </div>
-          </Section>
-        )}
-
-        {/* Diff */}
-        {diff && diff.changes.length > 0 && (
-          <Section title="🔄 Thay đổi so với lần trước">
-            <div className="space-y-2">
-              {diff.changes.map((change, i) => (
+          <Section title="Hoạt động & Sự kiện gần đây">
+            <div className="space-y-2.5">
+              {profile.recentActivities.map((act, i) => (
                 <div
                   key={i}
-                  className={`bg-surface rounded-xl px-4 py-3 border-l-3 ${
-                    change.significance === "high"
-                      ? "border-l-error"
-                      : change.significance === "medium"
-                        ? "border-l-warning"
-                        : "border-l-muted"
-                  }`}
+                  className="p-3 bg-surface rounded-xl border border-card-border/40"
                 >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`text-xs font-semibold uppercase ${
-                        change.changeType === "added"
-                          ? "text-success"
-                          : change.changeType === "removed"
-                            ? "text-error"
-                            : "text-warning"
-                      }`}
-                    >
-                      {change.changeType === "added"
-                        ? "MỚI"
-                        : change.changeType === "removed"
-                          ? "XÓA"
-                          : "SỬA"}
-                    </span>
-                    <span className="text-sm font-medium">{change.field}</span>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-foreground">
+                      {act.title}
+                    </p>
+                    {act.date && (
+                      <span className="text-[11px] text-muted shrink-0">
+                        {new Date(act.date).toLocaleDateString("vi-VN")}
+                      </span>
+                    )}
                   </div>
+                  <p className="text-xs text-muted mt-1 leading-relaxed">
+                    {act.summary}
+                  </p>
                 </div>
               ))}
-              <p className="text-xs text-muted mt-2 whitespace-pre-wrap">
-                {diff.summary}
-              </p>
             </div>
           </Section>
         )}
 
         {/* Sources */}
-        <Section title="Nguồn dữ liệu">
-          <div className="space-y-1.5">
-            {profile.sources.map((src, i) => (
-              <a
-                key={i}
-                href={src.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 text-xs text-muted hover:text-accent-light transition-colors group"
-              >
-                <span className="text-accent/40 group-hover:text-accent">🔗</span>
-                <span className="truncate">{src.url}</span>
-                <span className="ml-auto text-muted/50 shrink-0">
-                  [{src.source}]
-                </span>
-              </a>
-            ))}
-          </div>
-        </Section>
+        <SourceListSection sources={profile.sources} onOpenPreview={handleOpenPreview} />
       </div>
+
+      {/* Source Preview Modal Dialog */}
+      <SourcePreviewDialog
+        citation={selectedCitation}
+        isOpen={isPreviewOpen}
+        onClose={() => setIsPreviewOpen(false)}
+      />
     </div>
   );
 }
-
 // ─── Sub-components ───
 
 function Section({
@@ -443,14 +357,42 @@ function Section({
 function InfoItem({
   label,
   value,
+  href,
+  title,
+  evidence,
+  onEvidenceClick,
 }: {
   label: string;
   value: React.ReactNode;
+  href?: string;
+  title?: string;
+  evidence?: ClaimEvidence | null;
+  onEvidenceClick?: () => void;
 }) {
   return (
-    <div className="bg-surface rounded-xl px-4 py-3">
-      <p className="text-xs text-muted mb-0.5">{label}</p>
-      <p className="text-sm font-medium">{value}</p>
+    <div className="bg-surface rounded-xl px-4 py-3 border border-card-border/40 flex flex-col justify-between">
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <p className="text-xs text-muted">{label}</p>
+        {evidence && (
+          <EvidenceBadge evidence={evidence} onClick={onEvidenceClick} />
+        )}
+      </div>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm font-medium hover:text-accent-light flex items-center gap-1 group truncate"
+          title={title}
+        >
+          <span className="truncate">{value}</span>
+          <span className="text-[10px] text-muted opacity-0 group-hover:opacity-100 transition-opacity">
+            ↗
+          </span>
+        </a>
+      ) : (
+        <p className="text-sm font-medium truncate">{value}</p>
+      )}
     </div>
   );
 }
@@ -470,22 +412,5 @@ function ConfidenceBadge({ confidence }: { confidence: number }) {
     >
       {pct}% tin cậy
     </span>
-  );
-}
-
-function FitScoreGauge({ score }: { score: number }) {
-  const colorClass =
-    score >= 80
-      ? "from-emerald-500 to-teal-400 text-emerald-400"
-      : score >= 60
-        ? "from-amber-500 to-yellow-400 text-amber-400"
-        : "from-rose-500 to-red-400 text-rose-400";
-
-  return (
-    <div className="relative w-12 h-12 flex items-center justify-center rounded-xl bg-surface border border-card-border">
-      <span className={`text-base font-extrabold ${colorClass.split(" ")[2]}`}>
-        {score}
-      </span>
-    </div>
   );
 }

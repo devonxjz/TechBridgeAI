@@ -1,12 +1,24 @@
 "use client";
 
+import Image from "next/image";
 import { ResearchForm } from "./components/research-form";
 import { ResearchProgress } from "./components/research-progress";
 import { ProfileCard } from "./components/profile-card";
+import { CacheSuggestions } from "./components/cache-suggestions";
 import { useResearch } from "./hooks/use-research";
+import { getResearchRequestContext } from "./lib/research-request-context";
+import { AuthControls } from "./components/auth-controls";
 
 export default function HomePage() {
-  const { state, research, reset } = useResearch();
+  const {
+    state,
+    research,
+    selectSuggestion,
+    refreshResearch,
+    bypassAndResearch,
+    reset,
+  } = useResearch(getResearchRequestContext);
+
   const isLoading =
     state.status === "researching" || state.status === "building";
 
@@ -16,10 +28,12 @@ export default function HomePage() {
       <header className="border-b border-card-border bg-card/50 backdrop-blur-md sticky top-0 z-50">
         <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img
+            <Image
               src="/logo-icon.png"
               alt="PartnerIQ Logo"
-              className="w-9 h-9 object-contain drop-shadow-[0_0_12px_rgba(59,130,246,0.5)]"
+              width={36}
+              height={36}
+              className="object-contain drop-shadow-[0_0_12px_rgba(59,130,246,0.5)]"
             />
             <div>
               <h1 className="text-lg font-bold tracking-tight">PartnerIQ</h1>
@@ -29,15 +43,18 @@ export default function HomePage() {
             </div>
           </div>
 
-          {state.status !== "idle" && (
-            <button
-              onClick={reset}
-              className="text-xs text-muted hover:text-foreground transition-colors
-                         px-3 py-1.5 rounded-lg hover:bg-surface"
-            >
-              ← Nghiên cứu mới
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            <AuthControls />
+            {state.status !== "idle" && (
+              <button
+                onClick={reset}
+                className="text-xs text-muted hover:text-foreground transition-colors
+                           px-3 py-1.5 rounded-lg hover:bg-surface"
+              >
+                ← Nghiên cứu mới
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -58,7 +75,11 @@ export default function HomePage() {
               </p>
             </div>
 
-            <ResearchForm onSubmit={research} isLoading={isLoading} />
+            <ResearchForm
+              onSubmit={(input) => research(input)}
+              isLoading={isLoading}
+              initialInput={state.input}
+            />
 
             {/* Feature highlights */}
             <div className="grid grid-cols-3 gap-3 pt-4">
@@ -82,14 +103,40 @@ export default function HomePage() {
         ) : (
           /* ─── Research / Results state ─── */
           <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-6">
-            {/* Left panel: form + progress */}
+            {/* Left panel: form + progress + suggestions */}
             <div className="space-y-4">
-              <ResearchForm onSubmit={research} isLoading={isLoading} />
-              <ResearchProgress
-                sourceStatuses={state.sourceStatuses}
-                findings={state.findings}
-                status={state.status}
+              <ResearchForm
+                onSubmit={(input) => research(input)}
+                isLoading={isLoading}
+                initialInput={state.input}
               />
+
+              {state.status === "suggesting" ? (
+                <CacheSuggestions
+                  suggestions={state.suggestions}
+                  onSelect={selectSuggestion}
+                  onBypass={bypassAndResearch}
+                />
+              ) : (
+                <ResearchProgress
+                  sourceStatuses={state.sourceStatuses}
+                  findings={state.findings}
+                  status={state.status}
+                />
+              )}
+
+              {state.notice && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="glass-card p-4 border-l-3 border-l-amber-500 bg-amber-500/10 text-amber-200 animate-fade-in"
+                >
+                  <div className="flex items-center gap-2">
+                    <span>⚠️</span>
+                    <p className="text-xs font-medium">{state.notice}</p>
+                  </div>
+                </div>
+              )}
 
               {state.error && (
                 <div className="glass-card p-4 border-l-3 border-l-error animate-fade-in">
@@ -100,7 +147,37 @@ export default function HomePage() {
             </div>
 
             {/* Right panel: profile */}
-            <div>
+            <div className="min-w-0 space-y-4">
+              {state.profile && (
+                <div className="flex items-center justify-between gap-3 bg-surface/50 border border-border/50 rounded-xl p-3">
+                  <div className="flex items-center gap-2 text-xs">
+                    {state.cacheHit ? (
+                      <span className="badge badge-accent flex items-center gap-1">
+                        <span>⚡</span> Đã tải từ bộ nhớ đệm (v{state.cacheHit.version})
+                      </span>
+                    ) : (
+                      <span className="badge badge-success flex items-center gap-1">
+                        <span>✓</span> Nghiên cứu trực tiếp mới nhất
+                      </span>
+                    )}
+                    {state.cacheHit && (
+                      <span className="text-muted hidden sm:inline">
+                        Đồng bộ: {new Date(state.cacheHit.lastSyncedAt).toLocaleString("vi-VN")}
+                      </span>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={refreshResearch}
+                    disabled={isLoading}
+                    className="btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <span>🔄</span> Làm mới dữ liệu
+                  </button>
+                </div>
+              )}
+
               {state.profile ? (
                 <ProfileCard
                   profile={state.profile}

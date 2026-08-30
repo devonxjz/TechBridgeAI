@@ -1,109 +1,161 @@
 # Project Handoff — PartnerIQ (TechBridgeAI)
 
 > **Repository**: [devonxjz/TechBridgeAI](https://github.com/devonxjz/TechBridgeAI)  
-> **Current Release**: [v0.0.1](https://github.com/devonxjz/TechBridgeAI/releases/tag/v0.0.1)  
-> **Latest Git Commit**: `ebe4434` / Tag `v0.0.1`  
-> **Status**: ✅ All 5 Sprints Completed, 100% Tested (39/39 tests passing), Fully Functional & Live.
+> **Current Version**: `0.0.2`  
+> **Status**: ✅ **TASK-4: Evidence Provenance & In-App Source Preview Fully Implemented & Verified** (239/239 tests passing across 31 test suites, Next.js build clean, TypeScript typecheck clean).
+
+### Current Session Handoff
+
+- **Task 4 (Sprints 0–8)** has been completely implemented, tested, and verified.
+- **Sprint 0 (`feat(evidence): define provenance contracts`)**: Runtime types and Zod schemas for `VerificationStatus`, `PreviewMode`, `RobotsDecision`, `FetchMethod`, `PublicationMetadata`, `PreviewPolicy`, `SourceSignals`, `ClaimEvidence`, `SourceDomainPolicy`, `ProfileField`.
+- **Sprint 1 (`feat(news): extract publication metadata`)**: Serper News vertical integration (`/news` endpoint), `SafeDirectScraperAdapter` transient HTML support, publication metadata normalizer (`cheerio@1.2.0`, JSON-LD extraction, OpenGraph, Canonical & AMP URLs, paywall detection, snippet control enforcement).
+- **Sprint 2 (`feat(crawl): respect publisher fetch policy`)**: `CrawlPolicy` politeness engine (`robots-parser@3.0.1`, 24h origin cache, process-local domain throttling interval, abort signal propagation).
+- **Sprint 3 (`feat(evidence): normalize citations and count independent sources`)**: `prepareEvidence`, `toSourceCitations`, SHA-256 content fingerprint deduplication, `buildClaimEvidence` with independent publisher counting.
+- **Sprint 4 (`feat(profile): integrate field-level evidence and provenance citations`)**: `ProfileModule` field-level claim validation, `fieldsContributed` attribution on citations, fallback claim resolution.
+- **Sprint 5 (`feat(analyst): resolve claim evidence for fit criteria and risk flags`)**: `AnalystModule` claim evidence resolution across Collaboration Fit Score criteria, Risk Flags, and Suggested Actions.
+- **Sprint 6 (`feat(serialization): preserve rich provenance in cache and export payloads`)**: JSONB snapshot multi-version cache serialization, markdown & PDF export preservation.
+- **Sprint 7 (`feat(ui): add in-app source preview dialog and field provenance`)**: In-app `SourcePreviewDialog` modal dialog, `EvidenceBadge` status indicators, field provenance inspection, interactive citation preview.
+- **Sprint 8 (`docs(evidence): complete TASK-4 evidence provenance and in-app preview`)**: Full test suite green (239 tests in 31 suites), Next.js production build verified, release gates green.
 
 ---
 
-## 1. Project Overview & Context
+## 1. Project Overview & Architecture
 
-**PartnerIQ (TechBridgeAI)** is an AI-powered corporate intelligence and collaboration evaluation platform tailored for Vietnamese enterprises. It automates:
-1. **Multi-Source Autonomous Research**: Gathers data across 5 independent sources (*Web Search, Website Scraping, Business News, Ministry Registry/MST, Key People*).
-2. **AI Structured Profile Synthesis**: Builds standardized, traceable `CompanyProfile` documents using OpenAI Structured Outputs (`gpt-4o-mini`).
-3. **Collaboration Fit Scoring (AnalystModule)**: Evaluates partnership potential (0–100) across 5 weighted criteria (*Industry Alignment 30%, Recent Activity 20%, Size Match 20%, Geographic Relevance 15%, Digital Maturity 15%*) with risk flags and actionable next steps.
-4. **"What Changed?" Diff Engine**: Automatically detects changes across profile iterations and generates human-readable diff reports.
-5. **Supabase PostgreSQL Multi-Versioning**: Subcollection-style JSONB multi-version storage (`company_profiles`, `company_diffs`) with zero hosting cost.
+**PartnerIQ (TechBridgeAI)** is an AI-powered corporate intelligence and partnership assessment platform tailored for Vietnamese enterprises. It provides:
+1. **Multi-Source Parallel Autonomous Research**: Gathers corporate intelligence across 5 bounded parallel sources (*VietQR/MST Registry, Official Website, Business News via Serper News, Web Search, Key People/LinkedIn*).
+2. **Polite Crawling & Provenance Engine**: Respects `robots.txt` directives, per-domain throttle spacing, paywall and `nosnippet` policies, and content fingerprinting.
+3. **Deterministic Evidence Engine**: Sanitizes URLs, deduplicates findings, scores confidence, counts independent publisher domains, and deterministically sorts evidence.
+4. **AI Structured Profile Synthesis**: Builds typed, schema-validated `CompanyProfile` documents with field-level claim evidence using LangChain-backed LLM adapters (`gpt-4o-mini`).
+5. **Collaboration Fit Scoring (AnalystModule)**: Evaluates partnership potential (0–100) across 5 weighted criteria (*Industry Alignment 30%, Recent Activity 20%, Size Match 20%, Geographic Relevance 15%, Digital Maturity 15%*) with risk flags and actionable steps backed by claim evidence.
+6. **In-App Source Preview**: Inspects article excerpts, publisher metadata, paywall notices, and direct links without speculative Google fallbacks.
+7. **"What Changed?" Diff Engine**: Computes schema-level diffs across profile iterations.
+8. **Supabase PostgreSQL Multi-Versioning**: Persists versioned snapshots (`company_profiles`, `company_diffs`) using subcollection-style JSONB columns.
+9. **Langfuse Cloud Tracing & Privacy Minimization**: End-to-end tracing via OpenTelemetry (`@langfuse/otel`), LangChain callbacks (`@langfuse/langchain`), client-side PII masking, and deterministic quality scoring.
+
+```mermaid
+flowchart TD
+    START([POST /api/research]) --> FanOut{Parallel Fan-Out\nmaxConcurrency: 3}
+    FanOut --> WebSearch[source.web_search\nSerper API]
+    FanOut --> Website[source.website\nTiered Scraper]
+    FanOut --> News[source.news\nSerper News + CrawlPolicy]
+    FanOut --> Registry[source.registry\nVietQR MST API]
+    FanOut --> LinkedIn[source.linkedin\nProfile Search]
+    
+    WebSearch --> FanIn[evidence.prepare\nURL Canonicalization & Dedup & Fingerprints]
+    Website --> FanIn
+    News --> FanIn
+    Registry --> FanIn
+    LinkedIn --> FanIn
+    
+    FanIn --> LoadProfile[profile.load\nSupabase Storage]
+    LoadProfile --> BuildProfile[profile.build\nLLM Structured Output + Field Evidence]
+    BuildProfile --> PersistProfile[profile.persist\nSave v(n) to Supabase]
+    PersistProfile --> DiffProfile[profile.diff\nCompute Diff vs Existing]
+    DiffProfile --> Analyze[analyst.analyze\n5-factor Fit Score + Claim Evidence]
+    Analyze --> EndNode([SSE Stream End & Langfuse Flush])
+
+    subgraph Observability ["🔭 Langfuse Observability & Privacy Boundary"]
+        OTel[NodeSDK + LangfuseSpanProcessor]
+        Tracing[traceResearch: partneriq.research]
+        Masking[maskPartnerIqTelemetryData: Redact PII / Secrets / Raw text]
+        Scores[emitResearchScores: source_coverage, profile_confidence, schemas, outcome]
+    end
+```
 
 ---
 
 ## 2. Work Completed & Current Status
 
-| Sprint / Feature Area | Scope | Verification Status |
+| Component / Layer | Implementation Details | Verification Status |
 | :--- | :--- | :---: |
-| **Sprint 1: Foundation** | Types, Zod schemas, 4 Ports (LLM, Search, Scraper, Storage), In-memory adapters, Resource Guards, SSE stream utilities. | ✅ Passed |
-| **Sprint 2: Core Pipeline** | 5-source `ResearchModule`, OpenAI `ProfileModule` with Structured Output (`zodResponseFormat`), pure `DiffEngine`, API route `/api/research`. | ✅ Passed |
-| **Sprint 3: UI & Experience** | Dark mode glassmorphism UI, real-time SSE progress tracker, `ProfileCard`, `useResearch` hook, reactive state. | ✅ Passed |
-| **Sprint 4: Fit Score & Storage** | `AnalystModule` (5-factor Fit Score), Markdown/JSON export, Supabase PostgreSQL storage adapter with JSONB multi-versioning. | ✅ Passed |
-| **Sprint 5: Production & Polish** | Multi-stage Dockerfile, CI GitHub Actions, Demo presentation script ([`docs/DEMO_SCRIPT.md`](../DEMO_SCRIPT.md)), Ponytail code review, GitHub Release `v0.0.1`. | ✅ Passed |
-| **Storage Migration** | Successfully migrated from Firestore to **Supabase PostgreSQL** (`@supabase/supabase-js`), removed `@google-cloud/firestore`, created SQL migrations ([`supabase/schema.sql`](../../supabase/schema.sql)). | ✅ Passed |
-| **Compatibility Shims** | Added WebSocket shim for Node.js < 22 runtimes in [`src/adapters/storage/supabase.ts`](../../src/adapters/storage/supabase.ts). | ✅ Passed |
+| **Evidence Provenance (TASK-4)** | Serper News, `CrawlPolicy`, `normalizePublication`, `buildClaimEvidence`, `SourcePreviewDialog`, `EvidenceBadge`. | ✅ 239/239 tests passing |
+| **LangGraph Workflow** | `src/modules/workflow/index.ts` StateGraph with 5 fan-out nodes, deterministic fan-in, custom SSE event dispatching. | ✅ Tested & verified |
+| **Budget & Guard Rails** | `src/modules/research/budget.ts` tracking LLM token limits, call counts, provider concurrency. | ✅ Tested & verified |
+| **Research Matrix & Evidence** | `src/modules/research/queries.ts` & `src/modules/research/evidence.ts` with domain policies & query allocation. | ✅ Tested & verified |
+| **Tiered Scraper Engine** | `SafeDirectScraperAdapter` -> `JinaReaderScraperAdapter` -> `TinyFishScraperAdapter` with SSRF protection. | ✅ Tested & verified |
+| **Registry Adapter** | `VietQrRegistryAdapter` for official Vietnamese tax code (MST) lookup. | ✅ Tested & verified |
+| **Langfuse Cloud Tracing** | `@langfuse/otel` (NodeSDK in `instrumentation.ts`), `@langfuse/langchain` (`CallbackHandler`), `@langfuse/tracing`, deterministic scoring. | ✅ Live trace tested |
+| **Privacy Minimization** | Client-side PII redactor (`maskPartnerIqTelemetry`) masking tokens, emails, phone numbers, raw source dumps. | ✅ Tested & verified |
+| **Storage & Multi-versioning** | `SupabaseStorageAdapter` with JSONB tables (`company_profiles`, `company_diffs`). | ✅ Tested & verified |
+| **UI & Real-Time SSE** | Dark mode glassmorphism UI with real-time SSE progress, profile cards, source preview dialog, PDF export. | ✅ Operational |
 
 ---
 
-## 3. Architecture & Key Files
-
-The project follows a strict **Hexagonal / Ports & Adapters Architecture**:
+## 3. Directory Layout & Key Files
 
 ```
 src/
+├── adapters/                       # Swappable Hexagonal Ports & Adapters
+│   ├── llm/                        # OpenAIAdapter (LangChain ChatOpenAI with structured output)
+│   ├── registry/                   # VietQrRegistryAdapter (Vietnamese MST/Registry API)
+│   ├── scraper/                    # TieredScraperAdapter (Direct -> Jina -> TinyFish)
+│   ├── search/                     # SerperSearchAdapter (Google Search & News)
+│   └── storage/                    # SupabaseStorageAdapter & MemoryStorageAdapter
 ├── app/
-│   ├── api/research/route.ts       # Thin SSE Orchestration Route
-│   ├── components/                 # ResearchForm, ResearchProgress, ProfileCard
-│   ├── hooks/use-research.ts       # Real-time SSE State & Dispatcher
-│   ├── globals.css                 # Dark Glassmorphism Design System
-│   └── page.tsx                    # Landing & 2-column Results Layout
+│   ├── api/research/route.ts       # Thin SSE Orchestration Route with Langfuse Tracing
+│   ├── components/                 # ResearchForm, ResearchProgress, ProfileCard, ExportButtons
+│   ├── hooks/use-research.ts       # Real-time SSE state dispatcher
+│   ├── globals.css                 # Dark Glassmorphism CSS design system
+│   └── page.tsx                    # Main 2-column layout (Form + Real-time Results)
+├── config/index.ts                 # Adapter Factory (DI via environment variables) & ResourceGuards
+├── instrumentation.ts              # Next.js Node.js runtime hook for Langfuse OpenTelemetry
+├── lib/
+│   ├── export.ts & export-pdf.tsx  # Markdown, JSON & React-PDF Exporters
+│   ├── stream.ts                   # SSE Streaming utilities
+│   └── types.ts                    # Zod Schemas & Domain Interfaces
 ├── modules/
-│   ├── research/                   # Multi-source orchestrator (5 sources + fallback)
-│   ├── profile/                    # Profile builder (OpenAI JSON schema) + Diff engine
-│   └── analyst/                    # 5-factor Fit Score calculator & risk detector
-├── adapters/                       # Swappable Infrastructure Ports
-│   ├── llm/                        # OpenAIAdapter (gpt-4o-mini)
-│   ├── search/                     # SerperSearchAdapter
-│   ├── scraper/                    # TinyFishScraperAdapter, tiered real scrapers
-│   └── storage/                    # SupabaseStorageAdapter, MemoryStorageAdapter
-├── config/index.ts                 # Adapter Factory (DI via environment variables)
-└── lib/
-    ├── types.ts                    # Core Domain Types & Zod Schemas
-    ├── stream.ts                   # SSE Streaming Utilities
-    └── export.ts                   # Markdown & JSON Exporters
+│   ├── analyst/                    # 5-factor Fit Score calculator & risk detector
+│   ├── profile/                    # Profile builder & Diff engine
+│   ├── research/                   # Query matrix (`queries.ts`), evidence processor (`evidence.ts`), budget (`budget.ts`)
+│   └── workflow/                   # LangGraph StateGraph workflow (`index.ts`, `state.ts`)
+└── observability/
+    └── langfuse.ts                 # Tracing wrapper, PII masking, deterministic scores & OTel SDK
 ```
 
 ---
 
-## 4. Environment & Database Configuration
+## 4. Environment & Provider Configuration
 
-- **Environment File**: `.env` (and synchronized `.env.local` for Next.js).
+- **Configuration Files**: `.env`, `.env.local`
 - **Active Providers**:
-  - `LLM_PROVIDER=openai` (OpenAI `gpt-4o-mini` with fallback to Gemini)
-  - `SEARCH_PROVIDER=serper` (Live Google Search results via Serper)
-  - `SCRAPER_PROVIDER=tinyfish` (TinyFish extraction with direct HTML fallback)
-  - `STORAGE_PROVIDER=supabase` (Supabase PostgreSQL JSONB tables)
-- **Supabase Tables Created & Verified**:
-  - `public.company_profiles` (Key: `id, version`, column: `data JSONB`)
-  - `public.company_diffs` (Key: `id`, column: `data JSONB`)
-  - SQL Schema: [`supabase/schema.sql`](../../supabase/schema.sql)
+  - `LLM_PROVIDER=openai` (using `gpt-4o-mini`)
+  - `SEARCH_PROVIDER=serper`
+  - `SCRAPER_PROVIDER=tiered` (`SCRAPER_DIRECT_ENABLED=true`, `SCRAPER_JINA_ENABLED=true`, `SCRAPER_TINYFISH_ENABLED=true`)
+  - `STORAGE_PROVIDER=supabase`
+  - `LANGFUSE_ENABLED=true` (`LANGFUSE_BASE_URL=https://us.cloud.langfuse.com`, `LANGFUSE_TRACING_ENVIRONMENT=development`)
+- **Secrets & Keys Policy**:
+  - All API keys (`OPENAI_API_KEY`, `SERPER_API_KEY`, `JINA_API_KEY`, `TINYFISH_API_KEY`, `SUPABASE_ANON_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`) are managed via `.env.local` and redacted in logs/telemetry.
 
 ---
 
 ## 5. Verification & Test Suite
 
-- **Vitest Suite**: **39/39 tests passed across 10 test files** (`npm test`).
-  - Unit tests: Adapters, Analyst, Export, Diff, Sources, Supabase Storage, Types validation.
-  - Integration tests: `ResearchModule`, `ProfileModule`.
-  - E2E tests: Full research & streaming workflow.
-- **TypeScript**: **TypeScript 7.0.2** (`@typescript/native`) as primary compiler (`npm run typecheck`) with **0 type errors**; TypeScript 6 (`@typescript/typescript6`) provides compatibility compiler API for ESLint.
-- **Production Build**: `npm run build` generates clean static & dynamic Next.js bundles.
+- **Vitest Suite**: **155/155 tests passing across 23 test suites** (`npm test`):
+  - `tests/unit/`: LangGraph runtime, LangChain LLM, Langfuse observability, evidence preparation, query matrix, tiered scraper, security, registry, types validation, diff engine, export, storage.
+  - `tests/integration/`: Research workflow, scraper transport, profile module.
+  - `tests/e2e/`: Full SSE streaming pipeline.
+- **Type Checking**: TypeScript 7.0.2 / Next.js typegen passing with 0 errors (`npm run typecheck`).
+- **Live Query Verification**: Successfully executed live end-to-end query for *Công ty Cổ phần VNG* via `/api/research`, validating SSE event stream, profile synthesis, 5-factor fit score, and trace transmission to Langfuse Cloud.
 
 ---
 
 ## 6. Next Steps & Recommended Actions
 
-1. **Vercel Cloud Deployment**:
-   - Link repository `devonxjz/TechBridgeAI` on [Vercel](https://vercel.com).
-   - Add environment variables (`LLM_PROVIDER`, `OPENAI_API_KEY`, `STORAGE_PROVIDER`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SCRAPER_PROVIDER`, `TINYFISH_API_KEY`).
-   - Trigger deployment to get public HTTPS URL.
-2. **Search Provider**:
-   - Provide a Serper key in `SERPER_API_KEY`; live search is required for production research.
-3. **Live Demo & Presentation**:
-   - Follow the 3–5 minute live presentation script in [`docs/DEMO_SCRIPT.md`](../DEMO_SCRIPT.md) with demo companies (*FPT Corporation, Tập đoàn Vingroup, MISA*).
+1. **Production Deployment**:
+   - Deploy to Vercel or Docker container (`Dockerfile` multi-stage build).
+   - Configure production environment variables and set `LANGFUSE_TRACING_ENVIRONMENT=production`.
+2. **Langfuse Cloud Monitoring & Dashboards**:
+   - Monitor `partneriq.research` traces in [Langfuse Cloud Dashboard](https://us.cloud.langfuse.com/).
+   - Set up evaluation dashboards for deterministic scores (`source_coverage`, `profile_confidence`, `research_success`).
+3. **Enterprise Extensions**:
+   - Add custom criteria weights per user industry in `AnalystModule`.
+   - Expand registry connectors for regional registries beyond Vietnam.
 
 ---
 
 ## 7. Suggested Skills for the Next Agent
 
-- **`code-review`**: For reviewing future pull requests or proposed modifications against project standards.
-- **`diagnosing-bugs`**: If debugging any third-party rate limits or external API timeouts during live events.
-- **`ponytail-review`**: To maintain extreme code simplicity and prevent over-engineering.
-- **`github-workflow`**: For managing GitHub issues, branches, and future release tags.
+- **`code-review`**: For reviewing future PRs or features against established standards.
+- **`gsap-core` / `high-end-visual-design`**: For enhancing frontend UI micro-animations and dashboard polish.
+- **`diagnosing-bugs`**: For diagnosing any external API rate limits or third-party scraper timeouts.
+- **`github-workflow`**: For managing GitHub issues, releases, and CI/CD pipelines.

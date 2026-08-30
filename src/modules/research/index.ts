@@ -1,17 +1,12 @@
 // ═══════════════════════════════════════════════════════
-// ResearchModule — Deep Module
-// Orchestrates multiple sources, streams progress events.
-// Interface: research(input) → AsyncGenerator<ResearchEvent>
+// Research source runners used by the native workflow.
 // ═══════════════════════════════════════════════════════
 
 import type {
   CompanyInput,
   RawFinding,
-  ResearchEvent,
   SourceName,
-  SourceResult,
 } from "@/lib/types";
-import type { LLMAdapter } from "@/adapters/llm/types";
 import type { SearchAdapter } from "@/adapters/search/types";
 import type { ScraperAdapter } from "@/adapters/scraper/types";
 import type { RegistryAdapter } from "@/adapters/registry/types";
@@ -21,134 +16,109 @@ import { scrapeWebsite } from "./sources/website";
 import { searchNews } from "./sources/news";
 import { fetchRegistryData } from "./sources/registry";
 import { scrapeLinkedIn } from "./sources/linkedin";
+import { buildResearchQueries } from "./queries";
+import type { ResearchBudget } from "./budget";
 
-export interface ResearchModule {
-  research(input: CompanyInput): AsyncGenerator<ResearchEvent, void, unknown>;
+import type { CrawlPolicy } from "./crawl-policy";
+
+export interface ResearchSourceContext {
+  budget: ResearchBudget;
+  signal?: AbortSignal;
 }
 
+export type ResearchSourceRunner = (
+  input: CompanyInput,
+  context: ResearchSourceContext,
+) => Promise<RawFinding[]>;
+
 export interface ResearchDeps {
-  llm: LLMAdapter;
   search: SearchAdapter;
   scraper: ScraperAdapter;
   registry: RegistryAdapter;
   guards: ResourceGuards;
+  crawlPolicy?: CrawlPolicy;
 }
 
-export function createResearchModule(deps: ResearchDeps): ResearchModule {
+export function createResearchSourceRunners(
+  deps: ResearchDeps
+): Record<SourceName, ResearchSourceRunner> {
   return {
-    async *research(input: CompanyInput) {
-      const sources: {
-        name: SourceName;
-        fn: () => Promise<RawFinding[]>;
-      }[] = [
-        {
-          name: "web_search",
-          fn: () => searchWeb(input, deps.search),
-        },
-        {
-          name: "website",
-          fn: () =>
-            scrapeWebsite(
-              input,
-              deps.scraper,
-              deps.search,
-              deps.guards.maxScrapePagesPerResearch,
-            ),
-        },
-        {
-          name: "news",
-          fn: () => searchNews(input, deps.search),
-        },
-        {
-          name: "registry",
-          fn: () =>
-            fetchRegistryData(
-              input,
-              deps.search,
-              deps.scraper,
-              deps.registry,
-            ),
-        },
-        {
-          name: "linkedin",
-          fn: () => scrapeLinkedIn(input, deps.scraper),
-        },
-      ];
-
-      // Filter: only include linkedin if URL provided
-      const activeSources = sources.filter(
-        (s) => s.name !== "linkedin" || input.linkedinUrl
+    web_search: (input, context) =>
+      searchWeb(
+        input,
+        bindSearchAdapter(deps.search, context),
+        buildResearchQueries(input, deps.guards.maxQueriesPerResearch).web,
+      ),
+    website: (input, context) =>
+      scrapeWebsite(
+        input,
+        bindScraperAdapter(deps.scraper, context),
+        bindSearchAdapter(deps.search, context),
+        deps.guards.maxScrapePagesPerResearch,
+      ),
+    news: (input, context) => {
+      const extractionEnabled = process.env.NEWS_ARTICLE_EXTRACTION_ENABLED !== "false";
+      return searchNews(
+        input,
+        bindSearchAdapter(deps.search, context),
+        extractionEnabled ? bindScraperAdapter(deps.scraper, context) : undefined,
+        extractionEnabled ? deps.crawlPolicy : undefined,
+        buildResearchQueries(input, deps.guards.maxQueriesPerResearch).news,
       );
+    },
+    registry: (input, context) =>
+      fetchRegistryData(
+        input,
+        bindSearchAdapter(deps.search, context),
+        bindScraperAdapter(deps.scraper, context),
+        bindRegistryAdapter(deps.registry, context),
+      ),
+    linkedin: (input, context) =>
+      scrapeLinkedIn(input, bindScraperAdapter(deps.scraper, context)),
+  };
+}
 
-      const allFindings: RawFinding[] = [];
 
-      // Run sources sequentially to respect rate limits and provide streaming progress
-      for (const source of activeSources) {
-        yield {
-          type: "progress" as const,
-          source: source.name,
-          status: "started" as const,
-        };
-
-        const result = await runSourceWithTimeout(
-          source.name,
-          source.fn,
-          deps.guards.sourceTimeoutMs
-        );
-
-        if (result.ok) {
-          for (const finding of result.findings) {
-            allFindings.push(finding);
-            yield { type: "finding" as const, finding };
-          }
-          yield {
-            type: "progress" as const,
-            source: source.name,
-            status: "done" as const,
-          };
-        } else {
-          yield {
-            type: "error" as const,
-            source: source.name,
-            error: result.error.message,
-          };
-          yield {
-            type: "progress" as const,
-            source: source.name,
-            status: "failed" as const,
-          };
-        }
-      }
-
-      yield { type: "complete" as const, findings: allFindings };
+function bindSearchAdapter(
+  adapter: SearchAdapter,
+  context: ResearchSourceContext,
+): SearchAdapter {
+  return {
+    search: (query, options) => {
+      context.budget.claimSearchQuery();
+      return context.budget.runWithProviderSlot(
+        "search",
+        () => adapter.search(query, { ...options, signal: context.signal }),
+        context.signal,
+      );
     },
   };
 }
 
-async function runSourceWithTimeout(
-  source: SourceName,
-  fn: () => Promise<RawFinding[]>,
-  timeoutMs: number
-): Promise<SourceResult> {
-  try {
-    const result = await Promise.race([
-      fn(),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`Source ${source} timed out after ${timeoutMs}ms`)), timeoutMs)
+function bindScraperAdapter(
+  adapter: ScraperAdapter,
+  context: ResearchSourceContext,
+): ScraperAdapter {
+  return {
+    extract: (url) =>
+      context.budget.runWithProviderSlot(
+        "scraper",
+        () => adapter.extract(url, { signal: context.signal }),
+        context.signal,
       ),
-    ]);
-    return { ok: true, findings: result };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const isTimeout = message.includes("timed out");
-    return {
-      ok: false,
-      error: {
-        source,
-        type: isTimeout ? "timeout" : "network_error",
-        message,
-        retryable: isTimeout,
-      },
-    };
-  }
+  };
+}
+
+function bindRegistryAdapter(
+  adapter: RegistryAdapter,
+  context: ResearchSourceContext,
+): RegistryAdapter {
+  return {
+    findByTaxId: (taxId) =>
+      context.budget.runWithProviderSlot(
+        "registry",
+        () => adapter.findByTaxId(taxId, { signal: context.signal }),
+        context.signal,
+      ),
+  };
 }

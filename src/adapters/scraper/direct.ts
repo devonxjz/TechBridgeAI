@@ -5,13 +5,19 @@
 import http from "node:http";
 import https from "node:https";
 import type dns from "node:dns";
-import { ScrapeError, type ScraperAdapter, type ScrapedContent } from "./types";
+import {
+  ScrapeError,
+  type ScrapeOptions,
+  type ScraperAdapter,
+  type ScrapedContent,
+} from "./types";
 import { resolvePublicTarget, type ResolvedTarget } from "./url-safety";
 
 export interface DirectScraperLimits {
   timeoutMs: number;
   maxResponseBytes: number;
   maxRedirects: number;
+  minTextLength?: number;
   ca?: string | Buffer | Array<string | Buffer>;
 }
 
@@ -25,6 +31,7 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
       timeoutMs: 8_000,
       maxResponseBytes: 1_048_576,
       maxRedirects: 3,
+      minTextLength: 50,
     },
   ) {}
 
@@ -213,6 +220,7 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
   private async performSingleRequest(
     target: ResolvedTarget,
     remainingTimeout: number,
+    signal?: AbortSignal,
   ): Promise<SingleRequestResult> {
     return new Promise<SingleRequestResult>((resolve, reject) => {
       let settled = false;
@@ -223,6 +231,7 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
       const settleOnce = (fn: () => void) => {
         if (!settled) {
           settled = true;
+          signal?.removeEventListener("abort", onAbort);
           if (timeoutTimer) {
             clearTimeout(timeoutTimer);
             timeoutTimer = null;
@@ -236,6 +245,18 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
           fn();
         }
       };
+
+      const onAbort = () => {
+        settleOnce(() => {
+          reject(new ScrapeError("Direct fetch aborted", "direct", "upstream_error"));
+        });
+      };
+
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      signal?.addEventListener("abort", onAbort, { once: true });
 
       timeoutTimer = setTimeout(() => {
         settleOnce(() => {
@@ -290,6 +311,13 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
           return;
         }
 
+        if (statusCode === 404) {
+          settleOnce(() => {
+            reject(new ScrapeError("Direct fetch not found", "direct", "not_found"));
+          });
+          return;
+        }
+
         if (statusCode < 200 || statusCode >= 400) {
           settleOnce(() => {
             reject(
@@ -317,8 +345,9 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
             const titleMatch = fullHtml.match(/<title[^>]*>([^<]+)<\/title>/i);
             const title = titleMatch ? titleMatch[1].trim() : "";
             const cleanText = this.cleanHtml(fullHtml);
+            const minLength = this.limits.minTextLength ?? 50;
 
-            if (cleanText.length <= 50) {
+            if (cleanText.length <= minLength) {
               settleOnce(() => {
                 reject(new ScrapeError("Direct fetch returned empty text", "direct", "empty"));
               });
@@ -332,6 +361,7 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
                   url: target.url.toString(),
                   title,
                   text: cleanText.slice(0, 10000),
+                  html: fullHtml,
                   metadata: { provider: "direct" },
                 },
               });
@@ -341,6 +371,7 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
             settleOnce(() => reject(err));
           });
       });
+
 
       activeReq = req;
 
@@ -364,25 +395,34 @@ export class SafeDirectScraperAdapter implements ScraperAdapter {
     });
   }
 
-  async extract(initialUrl: string): Promise<ScrapedContent> {
+  async extract(
+    initialUrl: string,
+    options?: ScrapeOptions,
+  ): Promise<ScrapedContent> {
     const deadlineAt = Date.now() + this.limits.timeoutMs;
     let currentUrl = initialUrl;
     let redirectCount = 0;
 
     while (true) {
+      options?.signal?.throwIfAborted();
       const remainingBeforeDns = deadlineAt - Date.now();
       if (remainingBeforeDns <= 0) {
         throw new ScrapeError("Direct fetch timed out", "direct", "timeout");
       }
 
       const target = await resolvePublicTarget(currentUrl, deadlineAt);
+      options?.signal?.throwIfAborted();
 
       const remainingBeforeReq = deadlineAt - Date.now();
       if (remainingBeforeReq <= 0) {
         throw new ScrapeError("Direct fetch timed out", "direct", "timeout");
       }
 
-      const requestResult = await this.performSingleRequest(target, remainingBeforeReq);
+      const requestResult = await this.performSingleRequest(
+        target,
+        remainingBeforeReq,
+        options?.signal,
+      );
 
       if (requestResult.type === "redirect") {
         if (redirectCount >= this.limits.maxRedirects) {

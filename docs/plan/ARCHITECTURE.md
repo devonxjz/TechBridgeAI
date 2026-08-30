@@ -82,34 +82,87 @@ interface AnalystModule {
 }
 ```
 
-### Thin Orchestration Layer (API Route)
+### Thin Orchestration Layer (API Route & LangGraph)
 
-API route **chỉ là glue** — nối 3 modules theo pipeline, stream events về client. Không chứa business logic.
+API route **chỉ là adapter mỏng** (`runtime = "nodejs"`, `maxDuration = 300`) — khởi tạo `createResearchWorkflow(deps)` và stream sự kiện Server-Sent Events qua `stream(input, options)`.
 
 ```typescript
-// /api/research/[companyId]/route.ts — pseudocode
-async function POST(req) {
-  const input = parseInput(req.body)
+// /api/research/route.ts — pseudocode
+export const runtime = "nodejs";
+export const maxDuration = 300;
 
-  // 1. Research → stream progress
-  const findings = []
-  for await (const event of researchModule.research(input)) {
-    stream.write(event)
-    if (event.type === "finding") findings.push(event.finding)
-  }
+export async function POST(req: NextRequest) {
+  const input = CompanyInputSchema.parse(await req.json());
+  const workflow = createResearchWorkflow(deps);
+  const { stream, writer } = createSSEStream();
 
-  // 2. Build profile
-  const profile = await profileModule.buildProfile(findings)
-  const previous = await storage.getLatestProfile(input.companyId)
-  const diff = previous ? profileModule.diffProfiles(profile, previous) : null
+  const langfuseCallback = createLangfuseCallback({
+    researchRunId,
+    companyId: slugify(input.name),
+    requestedSources,
+  });
 
-  // 3. Analyze
-  const report = await analystModule.analyze(profile, { previousProfile: previous })
+  (async () => {
+    try {
+      for await (const event of workflow.stream(input, {
+        researchRunId,
+        signal: controller.signal,
+        callbacks: langfuseCallback ? [langfuseCallback] : undefined,
+      })) {
+        writer.write(event);
+      }
+    } finally {
+      await flushLangfuse();
+      writer.close();
+    }
+  })();
 
-  // 4. Persist + return
-  await storage.saveProfile(profile)
-  stream.write({ type: "result", profile, diff, report })
+  return new Response(stream, { headers: { "Content-Type": "text/event-stream" } });
 }
+```
+
+### LangGraph Parallel StateGraph Architecture
+
+Đồ thị trạng thái (`StateGraph`) điều phối việc thu thập và phân tích dữ liệu một cách độc lập và song song:
+
+```
+                  ┌───────────────┐
+                  │     START     │
+                  └───────┬───────┘
+          ┌───────────────┼───────────────┬───────────────┬───────────────┐
+          ▼               ▼               ▼               ▼               ▼
+    ┌───────────┐   ┌───────────┐   ┌───────────┐   ┌───────────┐   ┌───────────┐
+    │web_search │   │  website  │   │   news    │   │ registry  │   │ linkedin  │
+    └─────┬─────┘   └─────┬─────┘   └─────┬─────┘   └─────┬─────┘   └─────┬─────┘
+          └───────────────┼───────────────┴───────────────┴───────────────┘
+                          ▼
+                ┌──────────────────┐
+                │ prepare_evidence │ (Deterministic Canonicalization & Deduplication)
+                └─────────┬────────┘
+                          ▼
+                ┌──────────────────┐
+                │load_exist_profile│
+                └─────────┬────────┘
+                          ▼
+                ┌──────────────────┐
+                │  build_profile   │ (LLM with Untrusted-Data Delimiters)
+                └─────────┬────────┘
+                          ▼
+                ┌──────────────────┐
+                │ persist_profile  │
+                └─────────┬────────┘
+                          ▼
+                ┌──────────────────┐
+                │build_persist_diff│
+                └─────────┬────────┘
+                          ▼
+                ┌──────────────────┐
+                │     analyze      │ (Analyst Module)
+                └─────────┬────────┘
+                          ▼
+                  ┌───────────────┐
+                  │      END      │
+                  └───────────────┘
 ```
 
 ---

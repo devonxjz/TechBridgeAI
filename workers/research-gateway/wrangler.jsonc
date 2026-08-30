@@ -1,0 +1,64 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "techbridgeai-research-gateway",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-30",
+  "workers_dev": true,
+  "preview_urls": true,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "ENVIRONMENT": "local",
+    "ORIGIN_URL": "https://replace-before-deploy.invalid",
+    "SUPABASE_URL": "https://replace-before-deploy.supabase.co",
+    "SUPABASE_JWT_ISSUER": "https://replace-before-deploy.supabase.co/auth/v1",
+    "SUPABASE_JWT_AUDIENCE": "authenticated",
+    "MAX_BODY_BYTES": "262144",
+    "REPLAY_WINDOW_SECONDS": "60",
+    "ORIGIN_TIMEOUT_MS": "300000",
+    "SUPABASE_TIMEOUT_MS": "5000",
+    "QUOTA_OPERATION": "research",
+    "QUOTA_COST": "1",
+    "GATEWAY_KEY_ID": "current"
+  },
+  "env": {
+    "staging": {
+      "name": "techbridgeai-research-gateway-staging",
+      "vars": {
+        "ENVIRONMENT": "staging",
+        "ORIGIN_URL": "https://replace-staging-origin.invalid",
+        "SUPABASE_URL": "https://replace-staging.supabase.co",
+        "SUPABASE_JWT_ISSUER": "https://replace-staging.supabase.co/auth/v1",
+        "SUPABASE_JWT_AUDIENCE": "authenticated",
+        "MAX_BODY_BYTES": "262144",
+        "REPLAY_WINDOW_SECONDS": "60",
+        "ORIGIN_TIMEOUT_MS": "300000",
+        "SUPABASE_TIMEOUT_MS": "5000",
+        "QUOTA_OPERATION": "research",
+        "QUOTA_COST": "1",
+        "GATEWAY_KEY_ID": "current"
+      }
+    },
+    "production": {
+      "name": "techbridgeai-research-gateway-production",
+      "workers_dev": false,
+      "preview_urls": true,
+      "vars": {
+        "ENVIRONMENT": "production",
+        "ORIGIN_URL": "https://replace-production-origin.invalid",
+        "SUPABASE_URL": "https://replace-production.supabase.co",
+        "SUPABASE_JWT_ISSUER": "https://replace-production.supabase.co/auth/v1",
+        "SUPABASE_JWT_AUDIENCE": "authenticated",
+        "MAX_BODY_BYTES": "262144",
+        "REPLAY_WINDOW_SECONDS": "60",
+        "ORIGIN_TIMEOUT_MS": "300000",
+        "SUPABASE_TIMEOUT_MS": "5000",
+        "QUOTA_OPERATION": "research",
+        "QUOTA_COST": "1",
+        "GATEWAY_KEY_ID": "current"
+      }
+    }
+  }
+}

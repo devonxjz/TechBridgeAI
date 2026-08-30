@@ -10,6 +10,7 @@ export type ScrapeErrorCode =
   | "invalid_target"
   | "too_large"
   | "empty"
+  | "not_found"
   | "rate_limited"
   | "upstream_error";
 
@@ -19,6 +20,10 @@ export interface ScrapedContent {
   text: string;
   html?: string;
   metadata?: Record<string, unknown> & { provider?: ScraperProvider };
+}
+
+export interface ScrapeOptions {
+  signal?: AbortSignal;
 }
 
 export class ScrapeError extends Error {
@@ -34,5 +39,5 @@ export class ScrapeError extends Error {
 }
 
 export interface ScraperAdapter {
-  extract(url: string): Promise<ScrapedContent>;
+  extract(url: string, options?: ScrapeOptions): Promise<ScrapedContent>;
 }

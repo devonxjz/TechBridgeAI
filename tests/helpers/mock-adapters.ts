@@ -15,7 +15,7 @@ export class MockLLMAdapter implements LLMAdapter {
     this.responses.set(promptSubstring, response);
   }
 
-  async complete(prompt: string, options?: LLMOptions): Promise<string> {
+  private responseFor(prompt: string, options?: LLMOptions): string {
     this.callLog.push({ prompt, options });
     for (const [key, value] of this.responses) {
       if (prompt.includes(key)) return value;
@@ -28,18 +28,8 @@ export class MockLLMAdapter implements LLMAdapter {
     schema: z.ZodSchema<T>,
     options?: LLMOptions,
   ): Promise<T> {
-    const raw = await this.complete(prompt, options);
+    const raw = this.responseFor(prompt, options);
     return schema.parse(JSON.parse(raw));
-  }
-
-  async *stream(
-    prompt: string,
-    options?: LLMOptions,
-  ): AsyncGenerator<string, void, unknown> {
-    const response = await this.complete(prompt, options);
-    for (const word of response.split(" ")) {
-      yield word + " ";
-    }
   }
 }
 

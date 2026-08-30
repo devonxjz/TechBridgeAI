@@ -103,7 +103,9 @@ async function discoverWebsite(
       !url.includes("facebook.com") &&
       !url.includes("linkedin.com") &&
       !url.includes("wikipedia.org") &&
-      !url.includes("youtube.com")
+      !url.includes("youtube.com") &&
+      !url.includes("masothue.com") &&
+      !url.includes("thongtindoanhnghiep.co")
     ) {
       return result.url;
     }

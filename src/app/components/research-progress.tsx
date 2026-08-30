@@ -13,7 +13,7 @@ const SOURCE_LABELS: Record<SourceName, { label: string; icon: string }> = {
 
 interface ResearchProgressProps {
   sourceStatuses: Record<SourceName, SourceStatus>;
-  findings: { source: SourceName; summary: string }[];
+  findings: { source: SourceName; summary: string; url?: string }[];
   status: string;
 }
 
@@ -73,19 +73,37 @@ export function ResearchProgress({
       {/* Findings log */}
       {findings.length > 0 && (
         <details className="pt-2 border-t border-card-border">
-          <summary className="text-xs text-muted cursor-pointer hover:text-foreground transition-colors">
-            Xem {findings.length} phát hiện chi tiết
+          <summary className="text-xs text-muted cursor-pointer hover:text-foreground transition-colors font-medium">
+            Xem {findings.length} phát hiện chi tiết (Nhấn để mở nguồn kiểm chứng)
           </summary>
-          <div className="mt-2 space-y-1.5 max-h-40 overflow-y-auto">
-            {findings.map((f, i) => (
-              <div
-                key={i}
-                className="text-xs text-muted/70 bg-surface rounded-lg px-3 py-2 font-mono"
-              >
-                <span className="text-accent-light">[{f.source}]</span>{" "}
-                {f.summary.slice(0, 120)}...
-              </div>
-            ))}
+          <div className="mt-2 space-y-1.5 max-h-56 overflow-y-auto pr-1">
+            {findings.map((f, i) => {
+              const targetUrl =
+                f.url ||
+                `https://www.google.com/search?q=${encodeURIComponent(f.summary.slice(0, 80))}`;
+              return (
+                <a
+                  key={i}
+                  href={targetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-xs text-muted/80 bg-surface/90 hover:bg-card-border/80 hover:text-accent-light rounded-lg px-3 py-2 font-mono transition-all border border-card-border/40 hover:border-accent/30 group"
+                  title="Nhấn để mở nguồn chứng cứ trong tab mới"
+                >
+                  <div className="flex items-center gap-1.5 justify-between">
+                    <span className="text-accent-light font-semibold">
+                      [{SOURCE_LABELS[f.source]?.label ?? f.source}]
+                    </span>
+                    <span className="text-[10px] text-muted group-hover:text-accent-light">
+                      Mở nguồn ↗
+                    </span>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-foreground/80 font-sans">
+                    {f.summary}
+                  </p>
+                </a>
+              );
+            })}
           </div>
         </details>
       )}

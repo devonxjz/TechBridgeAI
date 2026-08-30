@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { z } from "zod";
 import {
   MockLLMAdapter,
@@ -8,24 +8,15 @@ import {
 import { MemoryStorageAdapter } from "@/adapters/storage/memory";
 import type { CompanyProfile, ProfileDiff } from "@/lib/types";
 
+const TEST_TENANT_ID = "tenant-test";
+const TEST_STORAGE_CONTEXT = { tenantId: TEST_TENANT_ID, userId: "user-test" };
+
 describe("Adapters Unit Tests", () => {
   describe("MockLLMAdapter", () => {
     let llm: MockLLMAdapter;
 
     beforeEach(() => {
       llm = new MockLLMAdapter();
-    });
-
-    it("returns default mock response when no match", async () => {
-      const res = await llm.complete("Tell me about company X");
-      expect(res).toBe('{"result": "mock response"}');
-      expect(llm.callLog.length).toBe(1);
-    });
-
-    it("returns canned response on substring match", async () => {
-      llm.setResponse("FPT", JSON.stringify({ officialName: "FPT Corporation" }));
-      const res = await llm.complete("Analyze FPT now");
-      expect(res).toContain("FPT Corporation");
     });
 
     it("supports completeStructured with zod schema", async () => {
@@ -39,14 +30,6 @@ describe("Adapters Unit Tests", () => {
       expect(result.founded).toBe(1988);
     });
 
-    it("supports streaming async generator", async () => {
-      llm.setResponse("hello", "Hello world from stream");
-      const chunks: string[] = [];
-      for await (const chunk of llm.stream("hello")) {
-        chunks.push(chunk);
-      }
-      expect(chunks.join("")).toContain("Hello world from stream");
-    });
   });
 
   describe("MockSearchAdapter", () => {
@@ -74,6 +57,77 @@ describe("Adapters Unit Tests", () => {
       expect(search.callLog.length).toBe(1);
     });
   });
+
+  describe("SerperSearchAdapter", () => {
+    it("calls news endpoint and maps publisher and date when vertical is news", async () => {
+      const { SerperSearchAdapter } = await import("@/adapters/search/serper");
+      const adapter = new SerperSearchAdapter("mock-key");
+
+      const originalFetch = globalThis.fetch;
+      try {
+        let calledUrl = "";
+
+        globalThis.fetch = vi.fn().mockImplementation(async (url: string | URL | Request) => {
+          calledUrl = String(url);
+          return {
+            ok: true,
+            json: async () => ({
+              news: [
+                {
+                  title: "FPT công bố lợi nhuận",
+                  link: "https://vnexpress.net/fpt-loi-nhuan",
+                  snippet: "Lợi nhuận quý tăng",
+                  source: "VnExpress",
+                  date: "1 ngày trước",
+                },
+              ],
+            }),
+          };
+        });
+
+        const results = await adapter.search("FPT lợi nhuận", { vertical: "news" });
+        expect(calledUrl).toBe("https://google.serper.dev/news");
+        expect(results.length).toBe(1);
+        expect(results[0].publisherName).toBe("VnExpress");
+        expect(results[0].publishedLabel).toBe("1 ngày trước");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("calls search endpoint when vertical is web or omitted", async () => {
+      const { SerperSearchAdapter } = await import("@/adapters/search/serper");
+      const adapter = new SerperSearchAdapter("mock-key");
+
+      const originalFetch = globalThis.fetch;
+      try {
+        let calledUrl = "";
+
+        globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+          calledUrl = url;
+          return {
+            ok: true,
+            json: async () => ({
+              organic: [
+                {
+                  title: "FPT Trang chủ",
+                  link: "https://fpt.com.vn",
+                  snippet: "Tập đoàn FPT",
+                },
+              ],
+            }),
+          };
+        });
+
+        const results = await adapter.search("FPT");
+        expect(calledUrl).toBe("https://google.serper.dev/search");
+        expect(results.length).toBe(1);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
 
   describe("MockScraperAdapter", () => {
     let scraper: MockScraperAdapter;
@@ -131,10 +185,10 @@ describe("Adapters Unit Tests", () => {
       const p1 = createDummyProfile("comp-1", 1);
       const p2 = createDummyProfile("comp-1", 2);
 
-      await storage.saveProfile(p1);
-      await storage.saveProfile(p2);
+      await storage.saveProfile(TEST_STORAGE_CONTEXT, p1);
+      await storage.saveProfile(TEST_STORAGE_CONTEXT, p2);
 
-      const latest = await storage.getLatestProfile("comp-1");
+      const latest = await storage.getLatestProfile(TEST_STORAGE_CONTEXT, "comp-1");
       expect(latest?.version).toBe(2);
       expect(latest?.officialName).toBe("Test Corp v2");
     });
@@ -143,20 +197,20 @@ describe("Adapters Unit Tests", () => {
       const p1 = createDummyProfile("comp-1", 1);
       const p2 = createDummyProfile("comp-1", 2);
 
-      await storage.saveProfile(p1);
-      await storage.saveProfile(p2);
+      await storage.saveProfile(TEST_STORAGE_CONTEXT, p1);
+      await storage.saveProfile(TEST_STORAGE_CONTEXT, p2);
 
-      const v1 = await storage.getProfile("comp-1", 1);
+      const v1 = await storage.getProfile(TEST_STORAGE_CONTEXT, "comp-1", 1);
       expect(v1?.version).toBe(1);
       expect(v1?.officialName).toBe("Test Corp v1");
     });
 
     it("lists latest profile across distinct companies", async () => {
-      await storage.saveProfile(createDummyProfile("comp-1", 1));
-      await storage.saveProfile(createDummyProfile("comp-1", 2));
-      await storage.saveProfile(createDummyProfile("comp-2", 1));
+      await storage.saveProfile(TEST_STORAGE_CONTEXT, createDummyProfile("comp-1", 1));
+      await storage.saveProfile(TEST_STORAGE_CONTEXT, createDummyProfile("comp-1", 2));
+      await storage.saveProfile(TEST_STORAGE_CONTEXT, createDummyProfile("comp-2", 1));
 
-      const list = await storage.listProfiles();
+      const list = await storage.listProfiles(TEST_STORAGE_CONTEXT);
       expect(list.length).toBe(2);
     });
 
@@ -169,10 +223,126 @@ describe("Adapters Unit Tests", () => {
         summary: "Updated description",
       };
 
-      await storage.saveDiff(diff);
-      const diffs = await storage.getDiffs("comp-1");
+      await storage.saveDiff(TEST_STORAGE_CONTEXT, diff);
+      const diffs = await storage.getDiffs(TEST_STORAGE_CONTEXT, "comp-1");
       expect(diffs.length).toBe(1);
       expect(diffs[0].summary).toBe("Updated description");
+    });
+
+    it("resolves, persists, and retrieves complete research snapshots", async () => {
+      const identity = {
+        taxId: "0101245486",
+        domain: "vingroup.net",
+        name: "tập đoàn vingroup",
+      };
+
+      const resolvedId = await storage.resolveOrCreateIdentity(TEST_STORAGE_CONTEXT, identity, "company-a");
+      expect(resolvedId).toBe("company-a");
+
+      const draftSnapshot = {
+        profile: createDummyProfile("company-a", 1),
+        report: {
+          companyId: "company-a",
+          generatedAt: new Date(),
+          riskFlags: [],
+          suggestedActions: [],
+          executiveSummary: "Summary",
+        },
+        diff: null,
+      };
+
+      const saved = await storage.persistResearchSnapshot(TEST_STORAGE_CONTEXT, identity, draftSnapshot);
+      expect(saved.profile.id).toBe("company-a");
+      expect(saved.lastSyncedAt).toBeDefined();
+
+      const candidates = await storage.findIdentityCandidates(TEST_STORAGE_CONTEXT, identity);
+      expect(candidates).toEqual([
+        expect.objectContaining({ companyId: "company-a", taxId: "0101245486" }),
+      ]);
+
+      const snapshot = await storage.getLatestCompleteSnapshot(TEST_STORAGE_CONTEXT, "company-a");
+      expect(snapshot).toMatchObject({
+        profile: { id: "company-a", version: 1 },
+        report: { companyId: "company-a" },
+        diff: null,
+      });
+    });
+
+    it("handles version 2 snapshot with matching diff", async () => {
+      const identity = {
+        taxId: "0101245486",
+        domain: "vingroup.net",
+        name: "tập đoàn vingroup",
+      };
+
+      await storage.resolveOrCreateIdentity(TEST_STORAGE_CONTEXT, identity, "company-a");
+
+      const v1Draft = {
+        profile: createDummyProfile("company-a", 1),
+        report: {
+          companyId: "company-a",
+          generatedAt: new Date(),
+          riskFlags: [],
+          suggestedActions: [],
+          executiveSummary: "Summary v1",
+        },
+        diff: null,
+      };
+      await storage.persistResearchSnapshot(TEST_STORAGE_CONTEXT, identity, v1Draft);
+
+      const v2Diff: ProfileDiff = {
+        companyId: "company-a",
+        fromVersion: 1,
+        toVersion: 2,
+        changes: [{ field: "description", oldValue: "v1", newValue: "v2", changeType: "modified", significance: "medium" }],
+        summary: "Upgraded to v2",
+      };
+
+      const v2Draft = {
+        profile: createDummyProfile("company-a", 2),
+        report: {
+          companyId: "company-a",
+          generatedAt: new Date(),
+          riskFlags: [],
+          suggestedActions: [],
+          executiveSummary: "Summary v2",
+        },
+        diff: v2Diff,
+      };
+      await storage.persistResearchSnapshot(TEST_STORAGE_CONTEXT, identity, v2Draft);
+
+      const snapshot = await storage.getLatestCompleteSnapshot(TEST_STORAGE_CONTEXT, "company-a");
+      expect(snapshot).toMatchObject({
+        profile: { id: "company-a", version: 2 },
+        report: { companyId: "company-a", executiveSummary: "Summary v2" },
+        diff: { toVersion: 2, summary: "Upgraded to v2" },
+      });
+    });
+
+    it("throws IdentityConflictError when tax ID is assigned to another company", async () => {
+      await storage.resolveOrCreateIdentity(
+        TEST_STORAGE_CONTEXT,
+        { taxId: "0101245486", domain: "vingroup.net", name: "vingroup" },
+        "company-a"
+      );
+
+      await expect(
+        storage.persistResearchSnapshot(
+          TEST_STORAGE_CONTEXT,
+          { taxId: "0101245486", domain: "other.vn", name: "other" },
+          {
+            profile: createDummyProfile("company-b", 1),
+            report: {
+              companyId: "company-b",
+              generatedAt: new Date(),
+              riskFlags: [],
+              suggestedActions: [],
+              executiveSummary: "Summary",
+            },
+            diff: null,
+          }
+        )
+      ).rejects.toThrow("Thông tin định danh công ty mâu thuẫn.");
     });
   });
 });
